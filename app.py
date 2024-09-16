@@ -4,35 +4,49 @@ import plotly.graph_objs as go
 import plotly.offline as pyo
 import plotly.io as pio
 from datetime import timedelta
+from pandas import Timedelta
 import numpy as np
 import datetime
 import os
 app = Flask(__name__)
 
-def parse_time(time_str):
-    if isinstance(time_str, float) or isinstance(time_str, int):
-        return float(time_str)
-    elif isinstance(time_str, pd.Timestamp):
-        return time_str.hour * 60 + time_str.minute + time_str.second / 60
-    elif isinstance(time_str, datetime.datetime):
-        # Handling datetime.datetime objects directly by extracting time
-        return time_str.hour * 60 + time_str.minute + time_str.second / 60
-    elif isinstance(time_str, datetime.time):
-        return time_str.hour * 60 + time_str.minute + time_str.second / 60
-    elif isinstance(time_str, str):
+
+from pandas import Timedelta
+
+def parse_time(time_obj):
+    if isinstance(time_obj, float) or isinstance(time_obj, int):
+        # Assume it's from Excel, representing days. Convert to minutes.
+        return float(time_obj) * 24 * 60
+    elif isinstance(time_obj, pd.Timestamp):
+        # Subtract base date to get total seconds
+        base_date = pd.Timestamp('1899-12-31')  # Excel's base date for 1900 date system
+        delta = time_obj - base_date
+        return delta.total_seconds() / 60
+    elif isinstance(time_obj, datetime.datetime):
+        # Subtract base date to get total seconds
+        base_date = datetime.datetime(1899, 12, 31)
+        delta = time_obj - base_date
+        return delta.total_seconds() / 60
+    elif isinstance(time_obj, datetime.time):
+        # Only time part, no days
+        return time_obj.hour * 60 + time_obj.minute + time_obj.second / 60
+    elif isinstance(time_obj, Timedelta):
+        # Handle pandas Timedelta objects (common in Excel uploads)
+        return time_obj.total_seconds() / 60
+    elif isinstance(time_obj, str):
         try:
-            parts = time_str.split(':')
+            parts = time_obj.split(':')
             if len(parts) == 3:
                 return timedelta(hours=int(parts[0]), minutes=int(parts[1]), seconds=int(parts[2])).total_seconds() / 60
             elif len(parts) == 2:
                 return timedelta(hours=int(parts[0]), minutes=int(parts[1])).total_seconds() / 60
+            else:
+                raise ValueError(f"Unsupported time format: {time_obj}")
         except ValueError:
-            raise ValueError(f"Unsupported string format for time_str: {time_str}")
+            raise ValueError(f"Unsupported string format for time_str: {time_obj}")
     else:
-        print(f"Encountered unsupported type: {type(time_str)} with value: {time_str}")
-        raise ValueError(f"Unsupported type for time_str: {type(time_str)}")
-
-    raise ValueError(f"Failed to parse time_str: {time_str} of type: {type(time_str)}")
+        print(f"Encountered unsupported type: {type(time_obj)} with value: {time_obj}")
+        raise ValueError(f"Unsupported type for time_str: {type(time_obj)}")
 
 
 @app.route('/', methods=['GET'])
@@ -47,33 +61,67 @@ def plate_selection():
 
     try:
         if file_extension == 'csv':
-            df = pd.read_csv(uploaded_file)
+            df = pd.read_csv(uploaded_file, header=0)
         elif file_extension in ['xls', 'xlsx']:
-            df = pd.read_excel(uploaded_file)
+            df = pd.read_excel(uploaded_file, header=0)
         else:
             return "Unsupported file format. Please upload a CSV or Excel file.", 400
 
-        df['Time'] = df['Time'].apply(parse_time)
-        
-        # Ensure all values are in minutes
-        if not isinstance(df['Time'].iloc[0], float):
-            df['Time'] = df['Time'].apply(lambda x: x.total_seconds() / 60 if isinstance(x, timedelta) else x)
-        
+        # Remove suffixes from column names
+        import re
+
+        def remove_suffixes(col_name):
+            return re.sub(r'\.\d+$', '', col_name)
+
+        df.columns = [remove_suffixes(col) for col in df.columns]
+
+        # Ensure 'Time' column exists and handle it properly
+        if 'Time' not in df.columns:
+            return "The uploaded file must contain a 'Time' column.", 400
+
+        # Extract and process the 'Time' column
+        time_column = df['Time'].apply(parse_time)
+        # Explicitly convert to float
+        time_column = pd.to_numeric(time_column, errors='raise')
+
+        # Insert the processed 'Time' column back into the dataframe
+        df.drop(columns=['Time'], inplace=True)
+        df.insert(0, 'Time', time_column)
+
+        # Removed redundant processing below
+        # if not isinstance(time_column.iloc[0], float):
+        #     time_column = time_column.apply(lambda x: x.total_seconds() / 60 if isinstance(x, timedelta) else x)
+
         global data
         data = df
         return redirect(url_for('edit', plate_type=plate_type))
     except (pd.errors.EmptyDataError, ValueError) as e:
         return f"Error processing file: {str(e)}. Please upload a valid CSV or Excel file.", 400
 
+
 @app.route('/edit', methods=['GET', 'POST'])
 def edit():
     plate_type = request.args.get('plate_type', default='96')
+    use_labels = 'no'  # Default value
+
     if request.method == 'POST':
-        well_name_map = request.form.to_dict()
-        df = data.rename(columns=well_name_map)
+        form_data = request.form.to_dict()
+        use_labels = form_data.pop('use_labels', 'no')
+
+        if use_labels == 'yes':
+            # If "Use CSV/Excel Labels" checkbox is checked, keep the original column names
+            df = data.copy()
+        else:
+            # Rename columns based on the form input
+            well_name_map = form_data
+            # Ensure we only keep columns that were renamed via the GUI, discard originals
+            df = data.rename(columns=well_name_map).loc[:, list(well_name_map.values()) + ['Time']]
+
         global renamed_data
         renamed_data = df
         return redirect(url_for('results'))
+    else:
+        use_labels = 'no'
 
     # Exclude the 'Time' column from the max_values calculation
     well_data = data.iloc[:, 1:]  # Exclude the 'Time' column
@@ -95,37 +143,58 @@ def edit():
     x_labels = [f"{i+1}" for i in range(cols)]
     y_labels = [f"{chr(65+i)}" for i in range(rows)]  # 'A' to 'H' or 'A' to 'P'
 
-    # Generate the heatmap with gaps
-    heatmap = go.Heatmap(
-        z=heatmap_data,
-        x=x_labels,
-        y=y_labels,  # No reverse here; labels should correspond to data directly
-        colorscale='Sunsetdark',
-        xgap=1,  # Add gaps between columns
-        ygap=1,   # Add gaps between rows
-        hovertemplate='Column: %{x}<br>Row: %{y}<br>Value: %{z}<extra></extra>'  
-    )
-    heatmap_fig = go.Figure(data=[heatmap])
+        # Generate the heatmap with gaps and specific sizing for each plate type
+    if plate_type == '96':
+        heatmap = go.Heatmap(
+            z=heatmap_data,
+            x=x_labels,
+            y=y_labels,
+            colorscale='Sunsetdark',
+            xgap=0.5,  # Smaller gap for 96 well plate
+            ygap=0.5,  # Smaller gap for 96 well plate
+            hovertemplate='Column: %{x}<br>Row: %{y}<br>Value: %{z}<extra></extra>'
+        )
+        # Initialize the figure before calling update_layout
+        heatmap_fig = go.Figure(data=[heatmap])
+        heatmap_fig.update_layout(
+            xaxis=dict(side="top"),
+            yaxis=dict(autorange="reversed"),
+            margin=dict(l=50, r=50, t=50, b=50),
+            width=600,  # Adjust width for 96 well plate
+            height=400  # Adjust height for 96 well plate
+        )
+    elif plate_type == '384':
+        heatmap = go.Heatmap(
+            z=heatmap_data,
+            x=x_labels,
+            y=y_labels,
+            colorscale='Sunsetdark',
+            xgap=1,  # Larger gap for 384 well plate
+            ygap=1,  # Larger gap for 384 well plate
+            hovertemplate='Column: %{x}<br>Row: %{y}<br>Value: %{z}<extra></extra>'
+        )
+        # Initialize the figure before calling update_layout
+        heatmap_fig = go.Figure(data=[heatmap])
+        heatmap_fig.update_layout(
+            xaxis=dict(side="top"),
+            yaxis=dict(autorange="reversed"),
+            margin=dict(l=50, r=50, t=50, b=50),
+            width=800,  # Adjust width for 384 well plate
+            height=600  # Adjust height for 384 well plate
+        )
 
-    # Adjust layout to place the column labels at the top
-    heatmap_fig.update_layout(
-        xaxis=dict(side="top"),  # Move the x-axis labels to the top
-        yaxis=dict(autorange="reversed"),  # Reverse the labels to match standard heatmap orientation
-        margin=dict(l=50, r=50, t=50, b=50)  # Adjust margins if needed
-    )
+
     # Save the heatmap as an HTML file
     heatmap_filename = 'heatmap.html'
     pio.write_html(heatmap_fig, file=heatmap_filename, full_html=True)
 
     heatmap_div = pyo.plot(heatmap_fig, output_type='div', include_plotlyjs=True)
 
-
-
     well_names = list(data.columns[1:])  # Exclude the 'Time' column
     if plate_type == '96':
-        return render_template('edit_96.html', well_names=well_names, heatmap_graph=heatmap_div)
+        return render_template('edit_96.html', well_names=well_names, heatmap_graph=heatmap_div, use_labels=use_labels)
     elif plate_type == '384':
-        return render_template('edit_384.html', well_names=well_names, heatmap_graph=heatmap_div)
+        return render_template('edit_384.html', well_names=well_names, heatmap_graph=heatmap_div, use_labels=use_labels)
 
 
 
@@ -153,15 +222,16 @@ def string_to_pastel_color(sample_name):
     return f"hsl({hue}, {saturation}%, {lightness}%)"
 
 def calculate_mean_std(df):
-    df = df.melt(id_vars=['Time'], var_name='Sample', value_name='OD')
-    df_mean = df.groupby(['Sample', 'Time']).mean().reset_index()
-    df_std = df.groupby(['Sample', 'Time']).std().reset_index()
+    df_melted = df.melt(id_vars=['Time'], var_name='Sample', value_name='OD')
+    df_mean = df_melted.groupby(['Sample', 'Time'])['OD'].mean().reset_index()
+    df_std = df_melted.groupby(['Sample', 'Time'])['OD'].std().reset_index()
 
     df_mean.rename(columns={'OD': 'mean_OD'}, inplace=True)
     df_std.rename(columns={'OD': 'std_OD'}, inplace=True)
 
-    df_plot = df_mean.merge(df_std, on=['Sample', 'Time'])
+    df_plot = pd.merge(df_mean, df_std, on=['Sample', 'Time'])
     return df_plot
+
 
 def create_plot(data):
     plot_data = calculate_mean_std(data)
@@ -219,6 +289,10 @@ def download_interactive_plot(filename):
 
 @app.route('/download/<string:csv_filename>')
 def download(csv_filename):
+    # Debug: print the shape of the dataframe
+    print("Renamed data shape:", renamed_data.shape)
+    print("Renamed data columns:", renamed_data.columns)
+
     csv_data = renamed_data.to_csv(index=False)
     response = make_response(csv_data)
     response.headers['Content-Disposition'] = f'attachment; filename={csv_filename}'

@@ -1,4 +1,3 @@
-<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -156,6 +155,13 @@
                 <label for="sample-name-input">Sample Name:</label>
                 <input type="text" class="form-control" id="sample-name-input" placeholder="Enter sample name" oninput="setCurrentSampleName()">
             </div>
+
+            <!-- Checkbox for Using CSV/Excel Labels -->
+            <div class="form-group">
+                <input type="checkbox" name="use_labels" id="use_labels" value="yes" {% if use_labels == 'yes' %}checked{% endif %}>
+                <label for="use_labels">Use CSV/Excel Labels as Well Names</label>
+            </div>
+
             <table class="table">
                 <thead>
                     <tr>
@@ -180,15 +186,17 @@
                     {% endfor %}
                 </tbody>
             </table>
+
             <div class="text-center">
                 <button type="submit" class="btn btn-primary">Submit</button>
             </div>
-            
         </form>
+
         <h2>Heatmap of Maximum Values</h2>
         <div>
             {{ heatmap_graph | safe }}
         </div>
+        
         <div style="text-align: center;">
             <a href="{{ url_for('download_heatmap', filename='heatmap.html') }}" class="btn btn-primary">Download Heatmap</a>
         </div>
