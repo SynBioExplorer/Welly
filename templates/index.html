@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welly - Upload CSV</title>
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            background-image: url("{{ url_for('static', filename='background.jpg') }}");
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: cover;
+            display: flex;
+            flex-direction: column;
+        }
+        .title-container {
+            text-align: center;
+            padding: 20px;
+            margin-top: 0; /* Remove margin to align title closer to the top */
+            flex-grow: 0; /* Prevent the title from taking extra space */
+        }
+        .centered-form {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            flex-grow: 1; /* Allow the form to take remaining space */
+        }
+        form {
+            border: 1px solid #ddd;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 5px;
+            margin-top: 1px; /* Space between title and form */
+        }
+        h1 {
+            font-size: 2.5em;
+            margin: 0;
+            color: white;
+        }
+        h2 {
+            font-size: 1.5em;
+            margin: 0;
+            color: white;
+        }
+        h3 {
+            text-align: center;
+            font-size: 1.5em;
+            margin: 0;
+            color: black;
+        }
+    </style>
+</head>
+<body>
+    <!-- Title aligned to the top -->
+    <div class="title-container">
+        <h1>Welly</h1>
+        <br>
+        <h2>Easily visualize and analyze growth curves from 96/384 well plate data.</h2>
+    </div>
+
+    <!-- Centered Form -->
+    <div class="centered-form">
+        <form action="{{ url_for('plate_selection') }}" method="POST" enctype="multipart/form-data">
+            <h3>Upload CSV/Excel</h3>
+            <br>
+            <input type="file" name="csv_file" accept=".csv, .xls, .xlsx">
+            <br><br>
+
+            <!-- Plate Type Selection -->
+            <div class="form-group">
+                <label for="plateSelection">Select Plate Type:</label>
+                <select class="form-control" id="plateSelection" name="plateType">
+                    <option value="96">96 Well Plate</option>
+                    <option value="384">384 Well Plate</option>
+                </select>
+            </div>
+            <br>
+            <div style="text-align: center;">
+                <input type="submit" value="Upload">
+            </div>
+
+            <p>Need an example?<br>
+                <a href="{{ url_for('static', filename='examples/example_data.csv') }}" download>Download example CSV file</a>
+            </p>
+
+
+        </form>
+    </div>
+</body>
+</html>

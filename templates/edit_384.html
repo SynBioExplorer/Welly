@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    
+    <!-- Custom styles for the well input and modal -->
+    <style>
+        .well-input {
+            border-radius: 50%;
+            text-align: center;
+            width: 20px;  
+            height: 20px; 
+            line-height: 20px;
+            font-size: 10px; 
+            padding: 2px; 
+        }
+
+        /* Modal styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            padding-top: 60px;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgb(0,0,0);
+            background-color: rgba(0,0,0,0.4);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+    </style>
+    
+    <!-- JavaScript for handling well input and modal functionality -->
+    <script>
+    let currentSampleName = '';
+    let mouseDown = false;
+
+    function setCurrentSampleName() {
+        currentSampleName = document.getElementById('sample-name-input').value;
+        colorizeWells(currentSampleName); // Colorize all matching wells when sample name is set
+    }
+
+    function applySampleName(event) {
+        if (currentSampleName && (mouseDown || event.type === 'mousedown')) {
+            event.target.value = currentSampleName;
+            colorizeWells(currentSampleName); // Colorize all matching wells
+        }
+    }
+
+    // Set mouseDown state true only when clicking on an input
+    function mouseDownHandler(event) {
+        if (event.target.classList.contains('well-input')) {
+            mouseDown = true;
+        }
+    }
+
+    // Reset mouseDown state when mouse is released
+    function mouseUpHandler() {
+        mouseDown = false;
+    }
+
+    function stringToPastelColor(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = hash * 31 + str.charCodeAt(i); // Simple, effective hash function
+            hash = hash ^ (hash << 10); // Shift and xor to increase sensitivity to each character's position
+            hash = hash ^ (hash >> 15); // Further mix the bits
+        }
+        hash = hash & 0xfffff; // Restrict the range of the hash to reduce overly large values
+        const hue = Math.abs(hash) % 360; // Ensure the hue is within the 0-360 range
+        const saturation = 60; // Keep saturation moderate to ensure pastel colors
+        const lightness = 85; // High lightness for pastel effect
+        return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+    }
+
+    // Function to colorize all wells with the same sample name
+    function colorizeWells(sampleName) {
+        const inputs = document.getElementsByClassName('well-input');
+        for (const input of inputs) {
+            if (input.value === sampleName) {
+                input.style.backgroundColor = stringToPastelColor(sampleName);
+            }
+        }
+    }
+
+    // Initial colorization on load for pre-filled values
+    window.onload = function() {
+        const inputs = document.getElementsByClassName('well-input');
+        for (const input of inputs) {
+            if (input.value) {
+                input.style.backgroundColor = stringToPastelColor(input.value);
+            }
+        }
+    };
+
+    document.addEventListener('mousedown', mouseDownHandler);
+    document.addEventListener('mouseup', mouseUpHandler);
+
+    // JavaScript to handle opening and closing the instruction modal
+    function openGuide() {
+        document.getElementById("guideModal").style.display = "block";
+    }
+
+    function closeGuide() {
+        document.getElementById("guideModal").style.display = "none";
+    }
+    </script>
+</head>
+<body>
+    <!-- Instruction Button and Modal -->
+    <button type="button" class="btn btn-info" onclick="openGuide()">Instructions</button>
+
+    <div id="guideModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeGuide()">&times;</span>
+            <h2>User Guide for Editing Well Plates</h2>
+            <p>
+                <strong>How to Use the Well Plate Editor</strong><br><br>
+                1. <strong>Enter a Sample Name:</strong> In the text box provided, type the name of the sample you want to analyze.<br><br>
+                2. <strong>Select Wells Containing Replicates:</strong> Click on the wells that correspond to your sample replicates. Each well you click will be filled with the sample name you entered.<br><br>
+                3. <strong>Automatic Calculation:</strong> The system will automatically calculate the mean and standard deviation for all wells with the same sample name.<br><br>
+                4. <strong>Exclusion of Empty Wells:</strong> Wells that are left empty will not be included in the analysis or displayed in the final results.
+            </p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h1>Edit Well Names</h1>
+        <form action="{{ url_for('edit') }}" method="post">
+            <div class="form-group">
+                <label for="sample-name-input">Sample Name:</label>
+                <input type="text" class="form-control" id="sample-name-input" placeholder="Enter sample name" oninput="setCurrentSampleName()">
+            </div>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Well</th>
+                        {% for col in range(1, 25) %}
+                            <th>{{ col }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set row_letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H','I','J','K','L','M','N','O','P'] %}
+                    {% for row_letter in row_letters %}
+                        <tr>
+                            <td>{{ row_letter }}</td>
+                            {% for col in range(1, 25) %}
+                                <td>
+                                    {% set well_name = row_letter + col|string %}
+                                    <input type="text" name="{{ well_name }}" class="form-control well-input" onmouseover="applySampleName(event)" onmousedown="applySampleName(event); mouseUpDown(true)" onmouseup="mouseUpDown(false)">
+                                </td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div class="text-center">
+                <button type="submit" class="btn btn-primary">Submit</button>
+            </div>
+        </form>
+        <h2>Heatmap of Maximum Values</h2>
+        <div>
+            {{ heatmap_graph | safe }}
+        </div>
+        <div style="text-align: center;">
+            <a href="{{ url_for('download_heatmap', filename='heatmap.html') }}" class="btn btn-primary">Download Heatmap</a>
+        </div>
+    </div>
+</body>
+</html>

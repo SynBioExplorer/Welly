@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Media Selection</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    <style>
+        .well-input {
+            border-radius: 50%;
+            text-align: center;
+            width: 40px;
+            height: 40px;
+            line-height: 40px;
+            border: 1px solid #ccc; /* Add border to wells */
+            cursor: pointer; /* Change cursor to indicate clickable */
+            background-color: #fff; /* Default background color */
+        }
+        /* ... other styles ... */
+    </style>
+    <script>
+        let currentMediaName = '';
+        let mediaColorMap = {};
+
+        function stringToPastelColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const hue = hash % 360;
+            return `hsl(${hue}, 100%, 85%)`;
+        }
+
+        function setCurrentMediaName() {
+            currentMediaName = document.getElementById('media-name-input').value;
+            if (!mediaColorMap[currentMediaName]) {
+                mediaColorMap[currentMediaName] = stringToPastelColor(currentMediaName);
+            }
+        }
+
+        function applyMediaName(well) {
+            if (currentMediaName) {
+                well.value = currentMediaName;
+                well.style.backgroundColor = mediaColorMap[currentMediaName];
+            }
+        }
+
+        function applyMediaToAll() {
+            if (currentMediaName) {
+                const wells = document.getElementsByClassName('well-input');
+                for (const well of wells) {
+                    applyMediaName(well);
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+    <!-- Hidden input to store plate type passed from Flask -->
+    <input type="hidden" id="hiddenPlateType" value="{{ plate_type }}">
+    <div class="container">
+        <h1>Select Media for Wells</h1>
+        <form action="{{ url_for('media_selection') }}" method="post">
+            <div class="form-group">
+                <label for="media-name-input">Media Name:</label>
+                <input type="text" class="form-control" id="media-name-input" placeholder="Enter media name" oninput="setCurrentMediaName()">
+            </div>
+            <button type="button" class="btn btn-primary" onclick="applyMediaToAll()">Apply to All</button>
+            <br><br>
+
+            <!-- Well Layout Table -->
+            <table class="table" id="wellTable"></table>
+
+            <button type="submit" class="btn btn-primary">Submit</button>
+        </form>
+    </div>
+
+    <script>
+        // ... Existing JavaScript functions ...
+
+        // Dynamically adjust the well layout based on plate selection
+        function adjustWellLayout() {
+            const plateType = document.getElementById('hiddenPlateType').value; // Get the plate type from the hidden input
+            const wellTable = document.getElementById('wellTable');
+            wellTable.innerHTML = ''; // Clear existing layout
+
+            // Logic to create well layout based on plateType
+            // ... (Your existing code to create the layout) ...
+        }
+
+        // Initialize default layout on page load
+        window.onload = adjustWellLayout;
+    </script>
+</body>
+</html>
