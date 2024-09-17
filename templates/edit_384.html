@@ -134,9 +134,10 @@
     </script>
 </head>
 <body>
+    <div class="text-center">
     <!-- Instruction Button and Modal -->
     <button type="button" class="btn btn-info" onclick="openGuide()">Instructions</button>
-
+    </div>
     <div id="guideModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeGuide()">&times;</span>
@@ -146,7 +147,8 @@
                 1. <strong>Enter a Sample Name:</strong> In the text box provided, type the name of the sample you want to analyze.<br><br>
                 2. <strong>Select Wells Containing Replicates:</strong> Click on the wells that correspond to your sample replicates. Each well you click will be filled with the sample name you entered.<br><br>
                 3. <strong>Automatic Calculation:</strong> The system will automatically calculate the mean and standard deviation for all wells with the same sample name.<br><br>
-                4. <strong>Exclusion of Empty Wells:</strong> Wells that are left empty will not be included in the analysis or displayed in the final results.
+                4. <strong>Exclusion of Empty Wells:</strong> Wells that are left empty will not be included in the analysis or displayed in the final results.<br><br>
+                <strong>Alternatively,</strong> check the tickbox to use the labels from your input data. Same labels will get treated as replicates.
             </p>
         </div>
     </div>
