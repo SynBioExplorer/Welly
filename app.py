@@ -8,6 +8,9 @@ from pandas import Timedelta
 import numpy as np
 import datetime
 import os
+from collections import defaultdict
+
+
 app = Flask(__name__)
 
 
@@ -51,10 +54,27 @@ def parse_time(time_obj):
 
 @app.route('/', methods=['GET'])
 def index():
+    global data, renamed_data, use_labels_global, well_name_map_global
+
+    # Reset global variables to ensure no leftover data from previous uploads
+    data = None
+    renamed_data = None
+    use_labels_global = None
+    well_name_map_global = None
+
     return render_template('index.html')
+
 
 @app.route('/plate_selection', methods=['POST'])
 def plate_selection():
+    global data, renamed_data, use_labels_global, well_name_map_global
+
+    # Reset global variables
+    data = None
+    renamed_data = None
+    use_labels_global = None
+    well_name_map_global = None
+
     uploaded_file = request.files['csv_file']
     plate_type = request.form['plateType']
     file_extension = uploaded_file.filename.split('.')[-1].lower()
@@ -67,13 +87,18 @@ def plate_selection():
         else:
             return "Unsupported file format. Please upload a CSV or Excel file.", 400
 
+        print("Initial DataFrame loaded:", df.head())  # Debugging
+
+        # Handle duplicate columns
+        df.columns = df.columns.to_series().apply(handle_duplicates)
+        
         # Remove suffixes from column names
         import re
-
         def remove_suffixes(col_name):
             return re.sub(r'\.\d+$', '', col_name)
-
         df.columns = [remove_suffixes(col) for col in df.columns]
+
+        print("DataFrame after removing suffixes:", df.head())  # Debugging
 
         # Ensure 'Time' column exists and handle it properly
         if 'Time' not in df.columns:
@@ -81,24 +106,32 @@ def plate_selection():
 
         # Extract and process the 'Time' column
         time_column = df['Time'].apply(parse_time)
-        # Explicitly convert to float
         time_column = pd.to_numeric(time_column, errors='raise')
 
         # Insert the processed 'Time' column back into the dataframe
         df.drop(columns=['Time'], inplace=True)
         df.insert(0, 'Time', time_column)
 
-        # Removed redundant processing below
-        # if not isinstance(time_column.iloc[0], float):
-        #     time_column = time_column.apply(lambda x: x.total_seconds() / 60 if isinstance(x, timedelta) else x)
+        print("Final DataFrame before saving:", df.head())  # Debugging
 
-        global data
         data = df
         return redirect(url_for('edit', plate_type=plate_type))
     except (pd.errors.EmptyDataError, ValueError) as e:
         return f"Error processing file: {str(e)}. Please upload a valid CSV or Excel file.", 400
 
 
+# Initialize a dictionary to track duplicate columns
+col_tracker = defaultdict(int)
+
+def handle_duplicates(col):
+    # Do not apply renaming to the "Time" column
+    if col == "Time":
+        return col
+    col_tracker[col] += 1
+    if col_tracker[col] > 1:
+        return f"{col}_{col_tracker[col] - 1}"
+    return col
+  
 @app.route('/edit', methods=['GET', 'POST'])
 def edit():
     plate_type = request.args.get('plate_type', default='96')
@@ -108,21 +141,41 @@ def edit():
         form_data = request.form.to_dict()
         use_labels = form_data.pop('use_labels', 'no')
 
-        if use_labels == 'yes':
-            # If "Use CSV/Excel Labels" checkbox is checked, keep the original column names
-            df = data.copy()
-        else:
-            # Rename columns based on the form input
-            well_name_map = form_data
-            # Ensure we only keep columns that were renamed via the GUI, discard originals
-            df = data.rename(columns=well_name_map).loc[:, list(well_name_map.values()) + ['Time']]
+        # **Step 1: Exclude 'Time' and empty sample labels from form_data**
+        form_data.pop('Time', None)  # Remove 'Time' if it's in form_data
+        # Filter out entries where the sample label is empty
+        well_name_map = {k: v for k, v in form_data.items() if v.strip() != ''}
 
-        global renamed_data
+        if use_labels == 'yes':
+            # Use labels from the CSV/Excel file
+            df = data.copy()
+            well_name_map = None  # No renaming needed
+        else:
+            # Rename columns in 'data' based on the mapping
+            df = data.rename(columns=well_name_map)
+
+            # Ensure 'Time' is in columns
+            if 'Time' not in df.columns:
+                raise ValueError("Time column not found in DataFrame after renaming.")
+
+            # **Step 1 Continued: Build list of columns to keep, ensuring 'Time' is first**
+            columns_to_keep = ['Time'] + list(well_name_map.values())
+            df = df[columns_to_keep]
+
+        global renamed_data, use_labels_global, well_name_map_global
         renamed_data = df
+        use_labels_global = use_labels
+        well_name_map_global = well_name_map
+
+        # Print statements for debugging
+        print("Renamed DataFrame shape:", renamed_data.shape)
+        print("Renamed DataFrame columns:", renamed_data.columns)
+        print("Use Labels Global:", use_labels_global)
+        print("Well Name Map Global:", well_name_map_global)
+
         return redirect(url_for('results'))
     else:
         use_labels = 'no'
-
     # Exclude the 'Time' column from the max_values calculation
     well_data = data.iloc[:, 1:]  # Exclude the 'Time' column
     max_values = well_data.max()  # Calculate the maximum values across all time points
@@ -209,6 +262,7 @@ def results():
     download_filename = "interactive_optical_density_plot.html"
     return render_template('results.html', plotly_graph=graph_div, csv_filename="renamed_data.csv", download_filename=download_filename)
 
+
 def string_to_pastel_color(sample_name):
     hash_val = 0
     for char in sample_name:
@@ -223,15 +277,14 @@ def string_to_pastel_color(sample_name):
 
 def calculate_mean_std(df):
     df_melted = df.melt(id_vars=['Time'], var_name='Sample', value_name='OD')
-    df_mean = df_melted.groupby(['Sample', 'Time'])['OD'].mean().reset_index()
-    df_std = df_melted.groupby(['Sample', 'Time'])['OD'].std().reset_index()
-
-    df_mean.rename(columns={'OD': 'mean_OD'}, inplace=True)
-    df_std.rename(columns={'OD': 'std_OD'}, inplace=True)
-
-    df_plot = pd.merge(df_mean, df_std, on=['Sample', 'Time'])
-    return df_plot
-
+    # Convert 'Time' from minutes to hours
+    df_melted['Time'] = df_melted['Time'] / 60
+    # Group by 'Sample' and 'Time' to calculate mean and sample standard deviation
+    df_grouped = df_melted.groupby(['Sample', 'Time']).agg(
+        mean_OD=('OD', 'mean'),
+        std_OD=('OD', 'std')  # Sample standard deviation (ddof=1 by default)
+    ).reset_index()
+    return df_grouped
 
 def create_plot(data):
     plot_data = calculate_mean_std(data)
@@ -268,6 +321,186 @@ def create_plot(data):
                       xaxis=dict(color='black', tickcolor='black', showgrid=False, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black'),
                       yaxis=dict(color='black', tickcolor='black', showgrid=False, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black'))
     return fig
+
+#############################################################################################################
+############################################################################################################
+# Step 1: Assign standard well labels without suffixes
+# Step 1: Assign standard well labels (A1-H12 for 96 wells, A1-P24 for 384 wells)
+def assign_well_labels(df, plate_type):
+    if 'Time' not in df.columns:
+        raise ValueError("Time column not found in DataFrame.")
+    
+    # Exclude 'Time' column
+    original_labels = [col for col in df.columns if col != 'Time']
+    # Generate well labels
+    if plate_type == '96':
+        well_labels = [f"{chr(65 + i)}{j + 1}" for i in range(8) for j in range(12)]
+    elif plate_type == '384':
+        well_labels = [f"{chr(65 + i)}{j + 1}" for i in range(16) for j in range(24)]
+    else:
+        raise ValueError("Invalid plate type")
+    
+    # Map well labels to original labels
+    label_mapping = dict(zip(well_labels[:len(original_labels)], original_labels))
+    
+    # Assign new columns
+    new_columns = ['Time'] + well_labels[:len(original_labels)]
+    if len(new_columns) != len(df.columns):
+        raise ValueError(f"Length mismatch: DataFrame has {len(df.columns)} columns, new labels have {len(new_columns)} elements")
+    
+    df.columns = new_columns
+    return df, label_mapping
+
+
+
+# Step 2: Get sample labels from CSV or user input and map them to the well labels
+def get_labels(df, use_labels, well_name_map=None):
+    """
+    Get labels for the samples based on user input (CSV or GUI) and map them to the well labels.
+    """
+    if use_labels == 'yes':
+        # Use the labels from the CSV, mapped to well labels
+        labels = {well: sample for well, sample in zip(df.columns[1:], df.columns[1:])}
+    else:
+        # Use the labels provided by the user via the GUI
+        labels = well_name_map or {}
+    return labels
+
+
+# Step 3: Replace well labels (A1, A2, etc.) with sample labels (e.g., sample1, sample2)
+def replace_well_labels_with_sample_labels(df, labels):
+    """
+    Replace well labels with actual sample labels (e.g., A1 -> sample1).
+    """
+    if labels:
+        new_columns = ['Time'] + [labels.get(col, col) for col in df.columns[1:]]
+        df.columns = new_columns
+    return df
+
+
+# Step 4: Calculate max growth rate per hour for each well/sample
+def calculate_max_growth_rate_per_hour(df):
+    # Handle duplicate columns (replicates) without renaming them in the original DataFrame
+    col_tracker = defaultdict(int)
+
+    def handle_duplicates(col):
+        col_tracker[col] += 1
+        if col_tracker[col] > 1:
+            return f"{col}_{col_tracker[col] - 1}"
+        return col
+
+    # Apply the duplicate handler function to the column names
+    df.columns = df.columns.to_series().apply(handle_duplicates)
+
+    # Melt the DataFrame to transform it into a long format
+    df_melted = pd.melt(df, id_vars=['Time'], var_name='Sample', value_name='OD')
+
+    # Convert Time to hours (if not already in hours)
+    df_melted['Time'] = df_melted['Time'] / 60  # Assuming Time is in minutes
+
+    # Calculate OD differences and Time differences for each replicate
+    df_melted['OD_diff'] = df_melted.groupby('Sample')['OD'].diff()
+    df_melted['Time_diff'] = df_melted.groupby('Sample')['Time'].diff()
+
+    # Calculate growth rates (OD/hour)
+    df_melted['Growth_rate'] = df_melted['OD_diff'] / df_melted['Time_diff']
+
+    # Handle cases with infinite or undefined growth rates
+    df_melted['Growth_rate'] = df_melted['Growth_rate'].replace([np.inf, -np.inf], np.nan).clip(lower=0)
+
+    # Aggregate by the original sample name (ignoring the _1, _2 suffixes) and find the max growth rate for each sample
+    df_melted['Original_Sample'] = df_melted['Sample'].str.replace(r'_\d+$', '', regex=True)
+    max_growth_rate_df = df_melted.groupby(['Original_Sample', 'Sample'])['Growth_rate'].max().reset_index()
+
+    return max_growth_rate_df
+
+
+
+# Step 5: Group replicates, calculate mean and std
+def group_replicates_and_calculate_mean_std(max_growth_rate_df):
+    """
+    Group replicates and calculate the mean and standard deviation of the maximum growth rates.
+    """
+    # Aggregating maximum growth rates for each original sample (across replicates)
+    summary = max_growth_rate_df.groupby('Original_Sample')['Growth_rate'].agg(['mean', 'std']).reset_index()
+
+    # Rename columns for clarity
+    summary.columns = ['Sample', 'Mean_growth_rate', 'Std_growth_rate']
+
+    return summary
+
+
+
+
+# Step 5: Plot the max growth rates (mean ± std)
+def plot_max_growth_rate(summary):
+    fig = go.Figure([go.Bar(
+        x=summary['Sample'],
+        y=summary['Mean_growth_rate'],
+        error_y=dict(type='data', array=summary['Std_growth_rate'], visible=True),
+        text=summary['Mean_growth_rate'],
+        textposition='auto'
+    )])
+
+    fig.update_layout(
+        title='Max Growth Rate (Mean ± Std)',
+        xaxis_title='Sample',
+        yaxis_title='Max Growth Rate (OD/hour)',
+        paper_bgcolor='white',
+        plot_bgcolor='white',
+        width=800,
+        height=600
+    )
+
+    return fig
+
+
+# Step 7: Download report with growth rate analysis
+@app.route('/download_report')
+def download_report():
+    global renamed_data, use_labels_global, well_name_map_global
+
+    use_labels = use_labels_global
+    well_name_map = well_name_map_global
+    plate_type = request.args.get('plate_type', '96')
+
+    # Calculate the max growth rate per hour for each well
+    max_growth_rates = calculate_max_growth_rate_per_hour(renamed_data.copy())
+
+    # Group replicates and calculate mean and std of the max growth rates
+    summary = group_replicates_and_calculate_mean_std(max_growth_rates)
+
+    # Plot the max growth rate (mean ± std)
+    max_growth_rate_fig = plot_max_growth_rate(summary)
+    max_growth_rate_html = pio.to_html(max_growth_rate_fig, full_html=False)
+
+    # Build the HTML content for the report
+    report_html = f"""
+    <html>
+    <head>
+        <title>Growth Analysis Report</title>
+    </head>
+    <body>
+        <h1>Growth Analysis Report</h1>
+        <h2>Max Growth Rate (Mean ± Std)</h2>
+        {max_growth_rate_html}
+    </body>
+    </html>
+    """
+
+    # Save and download the report as an HTML file
+    report_filename = 'growth_analysis_report.html'
+    with open(report_filename, 'w') as file:
+        file.write(report_html)
+
+    return send_file(report_filename, as_attachment=True)
+
+
+
+
+
+############################################################################################################
+############################################################################################################
 
 @app.route('/download_heatmap/<string:filename>')
 def download_heatmap(filename):

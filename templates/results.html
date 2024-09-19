@@ -16,6 +16,7 @@
         <div style="text-align: center;">
             <a href="{{ url_for('download_interactive_plot', filename='interactive_plot.html') }}" class="btn btn-primary">Download Interactive Plot</a>
             <a href="{{ url_for('download', csv_filename='renamed_data.csv') }}" class="btn btn-primary">Download Renamed CSV</a>
+            <a href="{{ url_for('download_report') }}" class="btn btn-primary">Download HTML Report</a> <!-- New button for report -->
             <a href="{{ url_for('index') }}" class="btn btn-primary">Back to Upload</a>
         </div>
     </div>
