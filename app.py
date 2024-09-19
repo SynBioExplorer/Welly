@@ -11,6 +11,7 @@ import os
 from collections import defaultdict
 from flask_caching import Cache
 import uuid
+from scipy.integrate import trapz
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)  # Random secret key for session management
@@ -178,8 +179,8 @@ def edit():
             xaxis=dict(side="top"),
             yaxis=dict(autorange="reversed"),
             margin=dict(l=50, r=50, t=50, b=50),
-            width=600,
-            height=400
+            width=800,
+            height=600
         )
     elif plate_type == '384':
         heatmap = go.Heatmap(
@@ -252,12 +253,14 @@ def create_plot(data):
         sample_data = plot_data[plot_data['Sample'] == sample]
         color = string_to_pastel_color(sample)
         trace = go.Scatter(
-            x=sample_data['Time']/60,
+            x=sample_data['Time'] / 60,  # Convert minutes to hours if needed
             y=sample_data['mean_OD'],
             error_y=dict(type='data', array=sample_data['std_OD'], visible=True, thickness=1),
             mode='lines+markers',
             name=sample,
-            line=dict(color=color, width=1)
+            line=dict(color=color, width=1),
+            text=[f"Time: {t/60:.3f} hours<br>OD: {val:.3f}" for t, val in zip(sample_data['Time'], sample_data['mean_OD'])],  # Format hovertext
+            hoverinfo='text'
         )
         traces.append(trace)
 
@@ -270,8 +273,8 @@ def create_plot(data):
         width=1000,
         height=750,
         xaxis=dict(
-            tickvals=np.arange(0, max(plot_data['Time']) / 60 + 1, 2),
-            ticktext=[int(hour) for hour in np.arange(0, max(plot_data['Time']) / 60 + 1, 2)]
+            tickvals=np.arange(0, max(plot_data['Time']) / 60 + 1, 2),  # Tick every hour
+            ticktext=[int(hour) for hour in np.arange(0, max(plot_data['Time']) / 60 + 1, 2)]  # Format tick labels without 'h'
         )
     )
 
@@ -281,6 +284,8 @@ def create_plot(data):
                       yaxis=dict(color='black', tickcolor='black', showgrid=False, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black'))
     return fig
 
+
+####################### Max growth rate calculation #######################
 
 # Step 1: Assign standard well labels without suffixes
 def assign_well_labels(df, plate_type):
@@ -357,31 +362,202 @@ def group_replicates_and_calculate_mean_std(max_growth_rate_df):
 
 # Step 6: Plot the max growth rates (mean ± std)
 def plot_max_growth_rate(summary):
+    summary['Mean_growth_rate'] = summary['Mean_growth_rate'].round(3)  # Round to 3 decimal places
+    summary['Std_growth_rate'] = summary['Std_growth_rate'].round(3)    # Round to 3 decimal places
+    
     fig = go.Figure([go.Bar(
         x=summary['Sample'],
         y=summary['Mean_growth_rate'],
-        error_y=dict(type='data', array=summary['Std_growth_rate'], visible=True),
-        text=summary['Mean_growth_rate'],
-        textposition='auto'
+        error_y=dict(type='data', array=summary['Std_growth_rate'], visible=True, thickness=1.5, color='black'),
+        text=summary['Mean_growth_rate'],  # Display rounded mean values
+        textposition='auto',
+        marker=dict(color='rgba(55, 83, 109, 0.7)')  # Subtle, consistent color for bars
     )])
 
     fig.update_layout(
-        title='Max Growth Rate (Mean ± Std)',
-        xaxis_title='Sample',
-        yaxis_title='Max Growth Rate (OD/hour)',
+        title=dict(
+            text='Max Growth Rate (Mean ± Std)',
+            x=0.5,
+            xanchor='center',
+            yanchor='top',
+            font=dict(size=18, family='Times New Roman')  # Title styling
+        ),
+        xaxis=dict(
+            title='Sample',
+            titlefont=dict(size=16, family='Times New Roman'),
+            tickfont=dict(size=14, family='Times New Roman'),
+            linecolor='black',
+            linewidth=2,
+            showgrid=False
+        ),
+        yaxis=dict(
+            title='Max Growth Rate (OD/hour)',
+            titlefont=dict(size=16, family='Times New Roman'),
+            tickfont=dict(size=14, family='Times New Roman'),
+            linecolor='black',
+            linewidth=2,
+            showgrid=True,
+            gridcolor='lightgray',
+            gridwidth=0.5
+        ),
         paper_bgcolor='white',
         plot_bgcolor='white',
         width=800,
-        height=600
+        height=600,
+        margin=dict(l=50, r=50, t=50, b=50),
     )
 
     return fig
+
+
+
+
+####################### Area under curve calculation #######################
+
+def calculate_auc(df):
+    """
+    Calculate the Area Under the Curve (AUC) for each well in the DataFrame.
+    """
+    auc_results = {}
+    time_values = df['Time'].values  # Get time values once to ensure consistency
+
+    for column in df.columns:
+        if column == 'Time':
+            continue
+
+        # Ensure there are no missing values and the lengths match
+        well_data = df[column].dropna().values  # Remove NaNs from the well data
+
+        print(f"Processing column: {column}")
+        print(f"Original time values length: {len(time_values)}")
+        print(f"Original well data length: {len(well_data)}")
+
+        if well_data.ndim > 1:
+            well_data = well_data.flatten()
+
+        # Check and match lengths of time and well data
+        if len(time_values) != len(well_data):
+            min_length = min(len(time_values), len(well_data))
+            time_values = time_values[:min_length]
+            well_data = well_data[:min_length]
+
+            print(f"Truncated time values length: {len(time_values)}")
+            print(f"Truncated well data length: {len(well_data)}")
+
+        # Calculate AUC using the trapezoidal rule
+        try:
+            auc = trapz(well_data, time_values)
+            auc_results[column] = auc
+        except ValueError as e:
+            print(f"Error calculating AUC for column {column}: {e}")
+            print(f"Time values: {time_values}")
+            print(f"Well data: {well_data}")
+            raise
+
+    return auc_results
+
+
+def group_auc_by_sample(df, auc_results):
+    """
+    Group AUC by sample names and calculate mean and standard deviation.
+    """
+    # Convert AUC results into a DataFrame
+    auc_df = pd.DataFrame(list(auc_results.items()), columns=['Sample', 'AUC'])
+    
+    # Extract the original sample name by removing any trailing numbers/underscore
+    auc_df['Original_Sample'] = auc_df['Sample'].str.replace(r'_\d+$', '', regex=True)
+
+    # Group by the original sample names
+    summary = auc_df.groupby('Original_Sample').agg(
+        Mean_AUC=('AUC', 'mean'),
+        Std_AUC=('AUC', 'std'),
+        Replicate_Count=('AUC', 'count')
+    ).reset_index()
+
+    # Round the Mean_AUC to the nearest integer
+    summary['Mean_AUC'] = summary['Mean_AUC'].round(0).astype(int)
+
+    # Replace NaN standard deviations with 0 where applicable
+    summary['Std_AUC'] = summary['Std_AUC'].fillna(0)
+
+    return summary
+
+
+
+
+
+def plot_auc(summary):
+    summary['Mean_AUC'] = summary['Mean_AUC'].round(3)  # Round to 3 decimal places
+    summary['Std_AUC'] = summary['Std_AUC'].round(3)    # Round to 3 decimal places
+
+    fig = go.Figure([go.Bar(
+        x=summary['Original_Sample'],  # Use 'Original_Sample' for x-axis
+        y=summary['Mean_AUC'],
+        error_y=dict(type='data', array=summary['Std_AUC'], visible=True, thickness=1.5, color='black'),
+        text=summary['Mean_AUC'],  # Display rounded mean values
+        textposition='auto',
+        marker=dict(color='rgba(55, 83, 109, 0.7)')  # Subtle, consistent color for bars
+    )])
+
+    fig.update_layout(
+        title=dict(
+            text='Area Under the Curve (Mean ± Std)',
+            x=0.5,
+            xanchor='center',
+            yanchor='top',
+            font=dict(size=18, family='Times New Roman')  # Title styling
+        ),
+        xaxis=dict(
+            title='Sample',
+            titlefont=dict(size=16, family='Times New Roman'),
+            tickfont=dict(size=14, family='Times New Roman'),
+            linecolor='black',
+            linewidth=2,
+            showgrid=False
+        ),
+        yaxis=dict(
+            title='AUC',
+            titlefont=dict(size=16, family='Times New Roman'),
+            tickfont=dict(size=14, family='Times New Roman'),
+            linecolor='black',
+            linewidth=2,
+            showgrid=True,
+            gridcolor='lightgray',
+            gridwidth=0.5
+        ),
+        paper_bgcolor='white',
+        plot_bgcolor='white',
+        width=800,
+        height=600,
+        margin=dict(l=50, r=50, t=50, b=50),
+    )
+
+    return fig
+
+
+
+
+
+
+####################### download stuff #######################
+
+
 
 @app.route('/download_report')
 def download_report():
     df = cache.get(f'renamed_data_{cache_key()}')
     if df is None:
         return "Session expired or no data available.", 400
+
+    # Calculate the AUC for each well
+    auc_results = calculate_auc(df)
+
+    # Group AUC by sample names
+    auc_summary = group_auc_by_sample(df, auc_results)
+
+    # Generate the AUC plot
+    auc_fig = plot_auc(auc_summary)
+    auc_html = pio.to_html(auc_fig, full_html=False)
 
     # Generate the line graph (optical density plot)
     line_graph = create_plot(df)
@@ -417,6 +593,8 @@ def download_report():
         {heatmap_html}
         <h2>Max Growth Rate (Mean ± Std)</h2>
         {max_growth_rate_html}
+        <h2>Area Under the Curve (Mean ± Std)</h2>
+        {auc_html}
     </body>
     </html>
     """
@@ -427,6 +605,7 @@ def download_report():
         file.write(report_html)
 
     return send_file(report_filename, as_attachment=True)
+
 
 
 @app.route('/download_heatmap/<string:filename>')
