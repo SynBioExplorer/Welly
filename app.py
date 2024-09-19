@@ -281,67 +281,7 @@ def create_plot(data):
                       yaxis=dict(color='black', tickcolor='black', showgrid=False, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black'))
     return fig
 
-@app.route('/download_report')
-def download_report():
-    df = cache.get(f'renamed_data_{cache_key()}')
-    if df is None:
-        return "Session expired or no data available.", 400
 
-    max_growth_rates = calculate_max_growth_rate_per_hour(df.copy())
-    summary = group_replicates_and_calculate_mean_std(max_growth_rates)
-    max_growth_rate_fig = plot_max_growth_rate(summary)
-    max_growth_rate_html = pio.to_html(max_growth_rate_fig, full_html=False)
-
-    report_html = f"""
-    <html>
-    <head>
-        <title>Growth Analysis Report</title>
-    </head>
-    <body>
-        <h1>Growth Analysis Report</h1>
-        <h2>Max Growth Rate (Mean ± Std)</h2>
-        {max_growth_rate_html}
-    </body>
-    </html>
-    """
-
-    report_filename = 'growth_analysis_report.html'
-    with open(report_filename, 'w') as file:
-        file.write(report_html)
-
-    return send_file(report_filename, as_attachment=True)
-
-@app.route('/download_heatmap/<string:filename>')
-def download_heatmap(filename):
-    file_path = os.path.join(os.getcwd(), filename)
-    if os.path.exists(file_path):
-        return send_file(file_path, as_attachment=True, download_name=filename)
-    else:
-        return "File not found.", 404
-
-@app.route('/download_interactive_plot/<string:filename>')
-def download_interactive_plot(filename):
-    df = cache.get(f'renamed_data_{cache_key()}')
-    if df is None:
-        return "Session expired or no data available.", 400
-    graph = create_plot(df)
-    pio.write_html(graph, file=filename, full_html=True)
-    return send_file(filename, as_attachment=True, download_name=filename)
-
-@app.route('/download/<string:csv_filename>')
-def download(csv_filename):
-    df = cache.get(f'renamed_data_{cache_key()}')
-    if df is None:
-        return "Session expired or no data available.", 400
-
-    csv_data = df.to_csv(index=False)
-    response = make_response(csv_data)
-    response.headers['Content-Disposition'] = f'attachment; filename={csv_filename}'
-    response.headers['Content-Type'] = 'text/csv'
-    return response
-
-#############################################################################################################
-############################################################################################################
 # Step 1: Assign standard well labels without suffixes
 def assign_well_labels(df, plate_type):
     if 'Time' not in df.columns:
@@ -436,6 +376,78 @@ def plot_max_growth_rate(summary):
     )
 
     return fig
+
+@app.route('/download_report')
+def download_report():
+    df = cache.get(f'renamed_data_{cache_key()}')
+    if df is None:
+        return "Session expired or no data available.", 400
+
+    # Generate the line graph (optical density plot)
+    line_graph = create_plot(df)
+    line_graph_html = pio.to_html(line_graph, full_html=False)
+
+    # Read the heatmap HTML content
+    heatmap_filename = 'heatmap.html'
+    if os.path.exists(heatmap_filename):
+        with open(heatmap_filename, 'r') as file:
+            heatmap_html = file.read()
+    else:
+        heatmap_html = "<p>Heatmap not available.</p>"
+
+    # Calculate the max growth rate per hour for each well
+    max_growth_rates = calculate_max_growth_rate_per_hour(df.copy())
+    summary = group_replicates_and_calculate_mean_std(max_growth_rates)
+
+    # Generate the max growth rate plot
+    max_growth_rate_fig = plot_max_growth_rate(summary)
+    max_growth_rate_html = pio.to_html(max_growth_rate_fig, full_html=False)
+
+    # Combine everything into the report HTML
+    report_html = f"""
+    <html>
+    <head>
+        <title>Growth Analysis Report</title>
+    </head>
+    <body>
+        <h1>Growth Analysis Report</h1>
+        <h2>Optical Density Line Graph</h2>
+        {line_graph_html}
+        <h2>Heatmap of Maximum OD Values</h2>
+        {heatmap_html}
+        <h2>Max Growth Rate (Mean ± Std)</h2>
+        {max_growth_rate_html}
+    </body>
+    </html>
+    """
+
+    # Save and send the report as an HTML file
+    report_filename = 'growth_analysis_report.html'
+    with open(report_filename, 'w') as file:
+        file.write(report_html)
+
+    return send_file(report_filename, as_attachment=True)
+
+
+@app.route('/download_heatmap/<string:filename>')
+def download_heatmap(filename):
+    file_path = os.path.join(os.getcwd(), filename)
+    if os.path.exists(file_path):
+        return send_file(file_path, as_attachment=True, download_name=filename)
+    else:
+        return "File not found.", 404
+
+@app.route('/download/<string:csv_filename>')
+def download(csv_filename):
+    df = cache.get(f'renamed_data_{cache_key()}')
+    if df is None:
+        return "Session expired or no data available.", 400
+
+    csv_data = df.to_csv(index=False)
+    response = make_response(csv_data)
+    response.headers['Content-Disposition'] = f'attachment; filename={csv_filename}'
+    response.headers['Content-Type'] = 'text/csv'
+    return response
 
 if __name__ == '__main__':
     print("Starting Flask server...")
