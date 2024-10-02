@@ -2,9 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Welly - Upload CSV</title>
+    <title>Welly - Upload CSV/Excel</title>
     <style>
         body, html {
             height: 100%;
@@ -13,28 +11,18 @@
             background-position: center;
             background-repeat: no-repeat;
             background-size: cover;
+            font-family: Arial, sans-serif;
+        }
+        .container {
             display: flex;
             flex-direction: column;
+            align-items: center;
+            padding: 20px;
         }
         .title-container {
             text-align: center;
             padding: 20px;
-            margin-top: 0; /* Remove margin to align title closer to the top */
-            flex-grow: 0; /* Prevent the title from taking extra space */
-        }
-        .centered-form {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-direction: column;
-            flex-grow: 1; /* Allow the form to take remaining space */
-        }
-        form {
-            border: 1px solid #ddd;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 5px;
-            margin-top: 1px; /* Space between title and form */
+            margin-top: 0;
         }
         h1 {
             font-size: 2.5em;
@@ -46,49 +34,182 @@
             margin: 0;
             color: white;
         }
-        h3 {
+        .instructions, .upload-form {
+            width: 100%;
+            max-width: 600px; /* Limit the width to match the demo table */
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px); /* For Safari */
+            border-radius: 10px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        /* Adjusted .upload-form to have max-width: 300px */
+        .upload-form {
+            max-width: 300px; /* Halve the size of the upload form */
+        }
+        .instructions h3, .upload-form h3 {
+            margin-top: 0;
             text-align: center;
-            font-size: 1.5em;
-            margin: 0;
-            color: black;
+        }
+        .instructions p, .instructions ul, .instructions li {
+            font-size: 14px; 
+            margin: 10px 0;
+        }
+        .demo-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+            background-color: white; /* Make the table background white */
+        }
+        .demo-table th, .demo-table td {
+            border: 1px solid #ddd;
+            padding: 6px;
+            text-align: center;
+            font-size: 12px;  /* Reduce font size to make the table smaller */
+        }
+        .demo-table th {
+            background-color: #f2f2f2;
+        }
+        .download-link {
+            text-align: center;
+            margin-top: 10px;
+        }
+        .download-link a {
+            color: blue;
+            text-decoration: underline;
+        }
+        .upload-form form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .upload-form input[type="file"] {
+            margin-bottom: 15px;
+        }
+        .upload-form .form-group {
+            margin-bottom: 15px;
+            width: 100%;
+            text-align: center;
+        }
+        .upload-form label, .upload-form select {
+            font-size: 14px;
+        }
+        .upload-form input[type="submit"] {
+            font-size: 14px;
+            padding: 5px 5px; /* Keep your style changes */
+            cursor: pointer;
+        }
+        /* Ensure only the boxes are blurred, not the entire background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: inherit;
+            z-index: -1;
         }
     </style>
 </head>
 <body>
-    <!-- Title aligned to the top -->
-    <div class="title-container">
-        <h1>Welly</h1>
-        <br>
-        <h2>Easily visualize and analyze growth curves from 96/384 well plate data.</h2>
-    </div>
-
-    <!-- Centered Form -->
-    <div class="centered-form">
-        <form action="{{ url_for('plate_selection') }}" method="POST" enctype="multipart/form-data">
-            <h3>Upload CSV/Excel</h3>
+    <div class="container">
+        <!-- Title aligned to the top -->
+        <div class="title-container">
+            <h1>Welly</h1>
             <br>
-            <input type="file" name="csv_file" accept=".csv, .xls, .xlsx">
-            <br><br>
+            <h2>Easily visualize and analyze growth curves from 96/384 well plate data.</h2>
+        </div>
 
-            <!-- Plate Type Selection -->
-            <div class="form-group">
-                <label for="plateSelection">Select Plate Type:</label>
-                <select class="form-control" id="plateSelection" name="plateType">
-                    <option value="96">96 Well Plate</option>
-                    <option value="384">384 Well Plate</option>
-                </select>
-            </div>
-            <br>
-            <div style="text-align: center;">
-                <input type="submit" value="Upload">
-            </div>
-
-            <p>Need an example?<br>
-                <a href="{{ url_for('static', filename='examples/example_data.csv') }}" download>Download example CSV file</a>
+        <!-- Instructions and Demo Table -->
+        <div class="instructions">
+            <h3>Instructions:</h3>
+            <p>
+                Please upload your CSV or Excel file containing the growth curve data. Please ensure that your file is formatted correctly:
             </p>
+            <ul>
+                <li><strong>If you plan to use the user interface to select sample names</strong> (i.e., you will map well positions to sample names in the application), your file must have standard well labels as column headers (e.g., 'Time', 'A1', 'A2', ..., 'H12' for a 96-well plate).</li>
+                <li><strong>If you plan to use labels from your file</strong> (i.e., you have already named your samples in the file), the labels can be anything.</li>
+            </ul>
+            <p>Below is an example of the expected file format when using the user interface for sample selection:</p>
 
+            <!-- Demo Table -->
+            <table class="demo-table">
+                <tr>
+                    <th>Time</th>
+                    <th>A1</th>
+                    <th>A2</th>
+                    <th>A3</th>
+                    <th>...</th>
+                    <th>H12</th>
+                </tr>
+                <tr>
+                    <td>00:00:00</td>
+                    <td>0.05</td>
+                    <td>0.06</td>
+                    <td>0.05</td>
+                    <td>...</td>
+                    <td>0.04</td>
+                </tr>
+                <tr>
+                    <td>00:10:00</td>
+                    <td>0.08</td>
+                    <td>0.09</td>
+                    <td>0.08</td>
+                    <td>...</td>
+                    <td>0.06</td>
+                </tr>
+                <tr>
+                    <td>00:20:00</td>
+                    <td>0.15</td>
+                    <td>0.14</td>
+                    <td>0.16</td>
+                    <td>...</td>
+                    <td>0.10</td>
+                </tr>
+                <tr>
+                    <td>00:30:00</td>
+                    <td>0.22</td>
+                    <td>0.21</td>
+                    <td>0.23</td>
+                    <td>...</td>
+                    <td>0.15</td>
+                </tr>
+                <tr>
+                    <td>...</td>
+                    <td>...</td>
+                    <td>...</td>
+                    <td>...</td>
+                    <td>...</td>
+                    <td>...</td>
+                </tr>
+            </table>
 
-        </form>
+            <div class="download-link">
+                Need an example? <a href="{{ url_for('static', filename='examples/example_data.csv') }}" download>Download example CSV file</a>
+            </div>
+        </div>
+
+        <!-- Upload Form -->
+        <div class="upload-form">
+            <h3>Upload CSV/Excel</h3>
+            <form action="{{ url_for('plate_selection') }}" method="POST" enctype="multipart/form-data">
+                <input type="file" name="csv_file" accept=".csv, .xls, .xlsx" required>
+
+                <!-- Plate Type Selection -->
+                <div class="form-group">
+                    <label for="plateSelection">Select Plate Type:</label>
+                    <select class="form-control" id="plateSelection" name="plateType">
+                        <option value="96">96 Well Plate</option>
+                        <option value="384">384 Well Plate</option>
+                    </select>
+                </div>
+
+                <!-- Submit Button -->
+                <input type="submit" value="Upload">
+            </form>
+        </div>
     </div>
 </body>
 </html>

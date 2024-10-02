@@ -314,6 +314,7 @@ def create_plot(df, sample_colors):
         )
         traces.append(trace)
 
+    # Layout settings with tick marks
     layout = go.Layout(
         title='Optical Density Readings',
         xaxis_title='Time (hours)',
@@ -325,20 +326,30 @@ def create_plot(df, sample_colors):
         xaxis=dict(
             color='black',
             tickcolor='black',
+            ticks='outside',   # Display tick marks outside the axis
+            ticklen=5,         # Length of the tick marks
+            tickwidth=2,       # Width of the tick marks
+            tickfont=dict(size=12),  # Font size for tick labels
             showgrid=False,
             gridcolor='lightgray',
             showline=True,
             linewidth=2,
-            linecolor='black'
+            linecolor='black',
+            mirror=True        # Mirror axis lines and ticks on opposite side
         ),
         yaxis=dict(
             color='black',
             tickcolor='black',
+            ticks='outside',
+            ticklen=5,
+            tickwidth=2,
+            tickfont=dict(size=12),
             showgrid=False,
             gridcolor='lightgray',
             showline=True,
             linewidth=2,
-            linecolor='black'
+            linecolor='black',
+            mirror=True
         )
     )
 
