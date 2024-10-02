@@ -12,6 +12,9 @@ from collections import defaultdict
 from flask_caching import Cache
 import uuid
 from scipy.integrate import trapz
+import hashlib
+import re
+import io
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)  # Random secret key for session management
@@ -19,7 +22,7 @@ app.config['SECRET_KEY'] = os.urandom(24)  # Random secret key for session manag
 # Configure file-based cache
 app.config['CACHE_TYPE'] = 'filesystem'
 app.config['CACHE_DIR'] = 'cache-directory'  # Directory for storing cache files
-app.config['CACHE_DEFAULT_TIMEOUT'] = 300  # Cache timeout in seconds
+app.config['CACHE_DEFAULT_TIMEOUT'] = 1000  # Cache timeout in seconds
 
 cache = Cache(app)
 
@@ -212,30 +215,68 @@ def edit():
     elif plate_type == '384':
         return render_template('edit_384.html', well_names=well_names, heatmap_graph=heatmap_div, use_labels=use_labels)
 
-@app.route('/results')
+# app.py
+
+
+@app.route('/results', methods=['GET', 'POST'])
 def results():
     df = cache.get(f'renamed_data_{cache_key()}')
     if df is None:
-        return "Session expired or no data available.", 400
+        return redirect(url_for('upload'))
 
-    named_wells = [col for col in df.columns if col.strip()]
-    df = df[named_wells]
-    graph = create_plot(df)
-    graph_div = pyo.plot(graph, output_type='div', include_plotlyjs=True)
-    download_filename = "interactive_optical_density_plot.html"
-    return render_template('results.html', plotly_graph=graph_div, csv_filename="renamed_data.csv", download_filename=download_filename)
+    # Get all sample names (excluding 'Time')
+    samples = [col for col in df.columns if col != 'Time']
 
-def string_to_pastel_color(sample_name):
-    hash_val = 0
-    for char in sample_name:
-        hash_val = hash_val * 31 + ord(char)
-        hash_val = hash_val ^ (hash_val << 10)
-        hash_val = hash_val ^ (hash_val >> 15)
-    hash_val = hash_val & 0xfffff
-    hue = abs(hash_val) % 360
-    saturation = 60
-    lightness = 85
-    return f"hsl({hue}, {saturation}%, {lightness}%)"
+    # Create a sorted list of unique sample names
+    unique_samples = sorted(set(samples))
+
+    # Retrieve existing sample colors or initialize with pastel colors
+    sample_colors = cache.get(f'sample_colors_{cache_key()}') or {}
+
+    # Ensure all unique samples have colors assigned
+    for sample in unique_samples:
+        if sample not in sample_colors or not sample_colors[sample]:
+            sample_colors[sample] = string_to_pastel_color(sample)
+    cache.set(f'sample_colors_{cache_key()}', sample_colors)
+
+    # Map sanitized sample names to original sample names
+    sanitized_to_original = {}
+    for sample in unique_samples:
+        sanitized_sample = re.sub(r'[^\w]', '_', sample)
+        sanitized_to_original[f'sample_color_{sanitized_sample}'] = sample
+
+    if request.method == 'POST':
+        # Process color selections
+        form_data = request.form.to_dict()
+        for key, value in form_data.items():
+            if key in sanitized_to_original:
+                sample = sanitized_to_original[key]
+                sample_colors[sample] = value.strip()
+        # Update the cache with new colors
+        cache.set(f'sample_colors_{cache_key()}', sample_colors)
+
+    # Generate the Plotly graph with the current colors
+    fig = create_plot(df, sample_colors)
+    plotly_graph = fig.to_html(full_html=False, include_plotlyjs='cdn')
+
+    return render_template('results.html', plotly_graph=plotly_graph, samples=samples,
+                           unique_samples=unique_samples, sample_colors=sample_colors)
+
+
+def string_to_pastel_color(s):
+    # Generate a hash of the string
+    hash_object = hashlib.md5(s.encode())
+    hash_int = int(hash_object.hexdigest()[:6], 16)
+    # Extract RGB components
+    r = (hash_int & 0xFF0000) >> 16
+    g = (hash_int & 0x00FF00) >> 8
+    b = (hash_int & 0x0000FF)
+    # Mix with white to get pastel colors
+    r = (r + 255) // 2
+    g = (g + 255) // 2
+    b = (b + 255) // 2
+    # Return as hex color code
+    return f'#{r:02X}{g:02X}{b:02X}'
 
 def calculate_mean_std(df):
     df_melted = df.melt(id_vars=['Time'], var_name='Sample', value_name='OD')
@@ -245,31 +286,33 @@ def calculate_mean_std(df):
     ).reset_index()
     return df_grouped
 
-def create_plot(data):
-    plot_data = calculate_mean_std(data)
+def create_plot(df, sample_colors):
+    data_columns = [col for col in df.columns if col != 'Time']
+    time_values = df['Time'] / 60  # Convert time to hours if necessary
+
+    melted_df = df.melt(id_vars=['Time'], value_vars=data_columns, var_name='Sample', value_name='OD')
+    melted_df['Time'] = melted_df['Time'] / 60  # Convert time to hours
+
+    group_df = melted_df.groupby(['Time', 'Sample']).agg({'OD': ['mean', 'std']}).reset_index()
+    group_df.columns = ['Time', 'Sample', 'mean_OD', 'std_OD']
+
     traces = []
-    for sample in plot_data['Sample'].unique():
-        sample_data = plot_data[plot_data['Sample'] == sample]
-        color = string_to_pastel_color(sample)
-        # Convert time to hours here
-        time_in_hours = sample_data['Time'] / 60
+    for sample in group_df['Sample'].unique():
+        sample_data = group_df[group_df['Sample'] == sample]
+        color = sample_colors.get(sample, string_to_pastel_color(sample))
+
         trace = go.Scatter(
-            x=time_in_hours,  # Use time in hours
+            x=sample_data['Time'],
             y=sample_data['mean_OD'],
             error_y=dict(type='data', array=sample_data['std_OD'], visible=True, thickness=1),
             mode='lines+markers',
             name=sample,
             line=dict(color=color, width=1),
-            text=[f"Time: {t:.3f} hours<br>OD: {val:.3f}" for t, val in zip(time_in_hours, sample_data['mean_OD'])],
+            marker=dict(color=color),
+            text=[f"Time: {t:.3f} hours<br>OD: {val:.3f}" for t, val in zip(sample_data['Time'], sample_data['mean_OD'])],
             hoverinfo='text'
         )
         traces.append(trace)
-
-    # Calculate max time in hours
-    max_time_hours = plot_data['Time'].max() / 60
-    # Create tick values every 2 hours
-    tick_vals = np.arange(0, max_time_hours + 1, 2)
-    tick_texts = [str(int(tick)) for tick in tick_vals]
 
     layout = go.Layout(
         title='Optical Density Readings',
@@ -280,8 +323,6 @@ def create_plot(data):
         width=1000,
         height=750,
         xaxis=dict(
-            tickvals=tick_vals,
-            ticktext=tick_texts,
             color='black',
             tickcolor='black',
             showgrid=False,
@@ -303,6 +344,9 @@ def create_plot(data):
 
     fig = go.Figure(data=traces, layout=layout)
     return fig
+
+
+
 
 
 ####################### Max growth rate calculation #######################
@@ -381,17 +425,20 @@ def group_replicates_and_calculate_mean_std(max_growth_rate_df):
     return summary
 
 # Step 6: Plot the max growth rates (mean ± std)
-def plot_max_growth_rate(summary):
-    summary['Mean_growth_rate'] = summary['Mean_growth_rate'].round(3)  # Round to 3 decimal places
-    summary['Std_growth_rate'] = summary['Std_growth_rate'].round(3)    # Round to 3 decimal places
+def plot_max_growth_rate(summary, sample_colors):
+    summary['Mean_growth_rate'] = summary['Mean_growth_rate'].round(3)
+    summary['Std_growth_rate'] = summary['Std_growth_rate'].round(3)
+    
+    # Create a list of colors for the samples
+    colors = [sample_colors.get(sample, '#37738F') for sample in summary['Sample']]
     
     fig = go.Figure([go.Bar(
         x=summary['Sample'],
         y=summary['Mean_growth_rate'],
         error_y=dict(type='data', array=summary['Std_growth_rate'], visible=True, thickness=1.5, color='black'),
-        text=summary['Mean_growth_rate'],  # Display rounded mean values
+        text=summary['Mean_growth_rate'],
         textposition='auto',
-        marker=dict(color='rgba(55, 83, 109, 0.7)')  # Subtle, consistent color for bars
+        marker=dict(color=colors)
     )])
 
     fig.update_layout(
@@ -400,7 +447,7 @@ def plot_max_growth_rate(summary):
             x=0.5,
             xanchor='center',
             yanchor='top',
-            font=dict(size=18, family='Times New Roman')  # Title styling
+            font=dict(size=18, family='Times New Roman')
         ),
         xaxis=dict(
             title='Sample',
@@ -428,6 +475,7 @@ def plot_max_growth_rate(summary):
     )
 
     return fig
+
 
 
 
@@ -508,17 +556,20 @@ def group_auc_by_sample(df, auc_results):
 
 
 
-def plot_auc(summary):
-    summary['Mean_AUC'] = summary['Mean_AUC'].round(3)  # Round to 3 decimal places
-    summary['Std_AUC'] = summary['Std_AUC'].round(3)    # Round to 3 decimal places
+def plot_auc(summary, sample_colors):
+    summary['Mean_AUC'] = summary['Mean_AUC'].round(3)
+    summary['Std_AUC'] = summary['Std_AUC'].round(3)
+
+    # Create a list of colors for the samples
+    colors = [sample_colors.get(sample, '#37738F') for sample in summary['Original_Sample']]
 
     fig = go.Figure([go.Bar(
-        x=summary['Original_Sample'],  # Use 'Original_Sample' for x-axis
+        x=summary['Original_Sample'],
         y=summary['Mean_AUC'],
         error_y=dict(type='data', array=summary['Std_AUC'], visible=True, thickness=1.5, color='black'),
-        text=summary['Mean_AUC'],  # Display rounded mean values
+        text=summary['Mean_AUC'],
         textposition='auto',
-        marker=dict(color='rgba(55, 83, 109, 0.7)')  # Subtle, consistent color for bars
+        marker=dict(color=colors)
     )])
 
     fig.update_layout(
@@ -527,7 +578,7 @@ def plot_auc(summary):
             x=0.5,
             xanchor='center',
             yanchor='top',
-            font=dict(size=18, family='Times New Roman')  # Title styling
+            font=dict(size=18, family='Times New Roman')
         ),
         xaxis=dict(
             title='Sample',
@@ -564,12 +615,14 @@ def plot_auc(summary):
 ####################### download stuff #######################
 
 
-
 @app.route('/download_report')
 def download_report():
     df = cache.get(f'renamed_data_{cache_key()}')
     if df is None:
         return "Session expired or no data available.", 400
+
+    # Retrieve sample_colors
+    sample_colors = cache.get(f'sample_colors_{cache_key()}') or {}
 
     # Calculate the AUC for each well
     auc_results = calculate_auc(df)
@@ -577,12 +630,12 @@ def download_report():
     # Group AUC by sample names
     auc_summary = group_auc_by_sample(df, auc_results)
 
-    # Generate the AUC plot
-    auc_fig = plot_auc(auc_summary)
+    # Generate the AUC plot with sample colors
+    auc_fig = plot_auc(auc_summary, sample_colors)
     auc_html = pio.to_html(auc_fig, full_html=False)
 
-    # Generate the line graph (optical density plot)
-    line_graph = create_plot(df)
+    # Generate the line graph with sample colors
+    line_graph = create_plot(df, sample_colors)
     line_graph_html = pio.to_html(line_graph, full_html=False)
 
     # Read the heatmap HTML content
@@ -597,8 +650,8 @@ def download_report():
     max_growth_rates = calculate_max_growth_rate_per_hour(df.copy())
     summary = group_replicates_and_calculate_mean_std(max_growth_rates)
 
-    # Generate the max growth rate plot
-    max_growth_rate_fig = plot_max_growth_rate(summary)
+    # Generate the max growth rate plot with sample colors
+    max_growth_rate_fig = plot_max_growth_rate(summary, sample_colors)
     max_growth_rate_html = pio.to_html(max_growth_rate_fig, full_html=False)
 
     # Combine everything into the report HTML
@@ -606,6 +659,7 @@ def download_report():
     <html>
     <head>
         <title>Growth Analysis Report</title>
+        <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     </head>
     <body>
         <h1>Growth Analysis Report</h1>
@@ -621,13 +675,13 @@ def download_report():
     </html>
     """
 
-    # Save and send the report as an HTML file
-    report_filename = 'growth_analysis_report.html'
-    with open(report_filename, 'w') as file:
-        file.write(report_html)
-
-    return send_file(report_filename, as_attachment=True)
-
+    # Return the report as an HTML file
+    return send_file(
+        io.BytesIO(report_html.encode('utf-8')),
+        download_name='growth_analysis_report.html',  # Updated parameter name
+        as_attachment=True,
+        mimetype='text/html'
+    )
 
 
 @app.route('/download_heatmap/<string:filename>')
