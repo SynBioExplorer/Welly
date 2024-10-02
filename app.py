@@ -239,7 +239,6 @@ def string_to_pastel_color(sample_name):
 
 def calculate_mean_std(df):
     df_melted = df.melt(id_vars=['Time'], var_name='Sample', value_name='OD')
-    df_melted['Time'] = df_melted['Time'] / 60
     df_grouped = df_melted.groupby(['Sample', 'Time']).agg(
         mean_OD=('OD', 'mean'),
         std_OD=('OD', 'std')
@@ -252,36 +251,57 @@ def create_plot(data):
     for sample in plot_data['Sample'].unique():
         sample_data = plot_data[plot_data['Sample'] == sample]
         color = string_to_pastel_color(sample)
+        # Convert time to hours here
+        time_in_hours = sample_data['Time'] / 60
         trace = go.Scatter(
-            x=sample_data['Time'] / 60,  # Convert minutes to hours if needed
+            x=time_in_hours,  # Use time in hours
             y=sample_data['mean_OD'],
             error_y=dict(type='data', array=sample_data['std_OD'], visible=True, thickness=1),
             mode='lines+markers',
             name=sample,
             line=dict(color=color, width=1),
-            text=[f"Time: {t/60:.3f} hours<br>OD: {val:.3f}" for t, val in zip(sample_data['Time'], sample_data['mean_OD'])],  # Format hovertext
+            text=[f"Time: {t:.3f} hours<br>OD: {val:.3f}" for t, val in zip(time_in_hours, sample_data['mean_OD'])],
             hoverinfo='text'
         )
         traces.append(trace)
 
+    # Calculate max time in hours
+    max_time_hours = plot_data['Time'].max() / 60
+    # Create tick values every 2 hours
+    tick_vals = np.arange(0, max_time_hours + 1, 2)
+    tick_texts = [str(int(tick)) for tick in tick_vals]
+
     layout = go.Layout(
         title='Optical Density Readings',
-        xaxis_title='time (hours)',
+        xaxis_title='Time (hours)',
         yaxis_title='OD600nm',
         paper_bgcolor='white',
         plot_bgcolor='white',
         width=1000,
         height=750,
         xaxis=dict(
-            tickvals=np.arange(0, max(plot_data['Time']) / 60 + 1, 2),  # Tick every hour
-            ticktext=[int(hour) for hour in np.arange(0, max(plot_data['Time']) / 60 + 1, 2)]  # Format tick labels without 'h'
+            tickvals=tick_vals,
+            ticktext=tick_texts,
+            color='black',
+            tickcolor='black',
+            showgrid=False,
+            gridcolor='lightgray',
+            showline=True,
+            linewidth=2,
+            linecolor='black'
+        ),
+        yaxis=dict(
+            color='black',
+            tickcolor='black',
+            showgrid=False,
+            gridcolor='lightgray',
+            showline=True,
+            linewidth=2,
+            linecolor='black'
         )
     )
 
     fig = go.Figure(data=traces, layout=layout)
-    fig.update_layout(plot_bgcolor='white',
-                      xaxis=dict(color='black', tickcolor='black', showgrid=False, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black'),
-                      yaxis=dict(color='black', tickcolor='black', showgrid=False, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black'))
     return fig
 
 
@@ -419,42 +439,43 @@ def calculate_auc(df):
     Calculate the Area Under the Curve (AUC) for each well in the DataFrame.
     """
     auc_results = {}
-    time_values = df['Time'].values  # Get time values once to ensure consistency
+    time_values = df['Time'].values  # Get time values once
 
-    for column in df.columns:
+    for idx in range(len(df.columns)):
+        column = df.columns[idx]
         if column == 'Time':
             continue
 
-        # Ensure there are no missing values and the lengths match
-        well_data = df[column].dropna().values  # Remove NaNs from the well data
+        # Access the column by position to avoid duplicate column name issues
+        od_values = df.iloc[:, idx].values
 
-        print(f"Processing column: {column}")
-        print(f"Original time values length: {len(time_values)}")
-        print(f"Original well data length: {len(well_data)}")
+        # Ensure time_values and od_values are the same length
+        if len(time_values) != len(od_values):
+            print(f"Length mismatch in column {column}. Skipping this well.")
+            continue
 
-        if well_data.ndim > 1:
-            well_data = well_data.flatten()
+        # Remove NaNs from both arrays
+        valid_indices = ~np.isnan(od_values) & ~np.isnan(time_values)
+        od_values_clean = od_values[valid_indices]
+        time_values_clean = time_values[valid_indices]
 
-        # Check and match lengths of time and well data
-        if len(time_values) != len(well_data):
-            min_length = min(len(time_values), len(well_data))
-            time_values = time_values[:min_length]
-            well_data = well_data[:min_length]
-
-            print(f"Truncated time values length: {len(time_values)}")
-            print(f"Truncated well data length: {len(well_data)}")
+        # Ensure arrays are one-dimensional
+        od_values_clean = od_values_clean.flatten()
+        time_values_clean = time_values_clean.flatten()
 
         # Calculate AUC using the trapezoidal rule
         try:
-            auc = trapz(well_data, time_values)
-            auc_results[column] = auc
+            auc = trapz(od_values_clean, time_values_clean)
+            # Since column names may not be unique, create a unique key for each column
+            unique_col_name = f"{column}_{idx}"
+            auc_results[unique_col_name] = {'Sample': column, 'AUC': auc}
         except ValueError as e:
             print(f"Error calculating AUC for column {column}: {e}")
-            print(f"Time values: {time_values}")
-            print(f"Well data: {well_data}")
-            raise
+            continue
 
     return auc_results
+
+
 
 
 def group_auc_by_sample(df, auc_results):
@@ -462,23 +483,24 @@ def group_auc_by_sample(df, auc_results):
     Group AUC by sample names and calculate mean and standard deviation.
     """
     # Convert AUC results into a DataFrame
-    auc_df = pd.DataFrame(list(auc_results.items()), columns=['Sample', 'AUC'])
-    
-    # Extract the original sample name by removing any trailing numbers/underscore
-    auc_df['Original_Sample'] = auc_df['Sample'].str.replace(r'_\d+$', '', regex=True)
+    auc_df = pd.DataFrame.from_dict(auc_results, orient='index')
 
-    # Group by the original sample names
+    # Now, 'Sample' and 'AUC' are columns in auc_df
+    # Use 'Sample' for grouping
+
+    # Use the sample names directly for grouping
+    auc_df['Original_Sample'] = auc_df['Sample']
+
+    # Proceed with grouping
     summary = auc_df.groupby('Original_Sample').agg(
         Mean_AUC=('AUC', 'mean'),
         Std_AUC=('AUC', 'std'),
         Replicate_Count=('AUC', 'count')
     ).reset_index()
 
-    # Round the Mean_AUC to the nearest integer
-    summary['Mean_AUC'] = summary['Mean_AUC'].round(0).astype(int)
-
-    # Replace NaN standard deviations with 0 where applicable
-    summary['Std_AUC'] = summary['Std_AUC'].fillna(0)
+    # Round Mean_AUC and Std_AUC
+    summary['Mean_AUC'] = summary['Mean_AUC'].round(3)
+    summary['Std_AUC'] = summary['Std_AUC'].fillna(0).round(3)
 
     return summary
 
