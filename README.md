@@ -13,7 +13,7 @@ Welly is a web-based application designed to facilitate the analysis of bacteria
 4. **Download Reports**: Download detailed analysis reports, including graphs and data summaries.
 
 ## Demo
-You can try the tool online at [Welly](http://welly.pythonanywhere.com).
+You can try the tool online at [Welly](http://synbioexplorer.pythonanywhere.com).
 
 ## Installation Guide
 
