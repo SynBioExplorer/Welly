@@ -25,7 +25,7 @@ You can try the tool online at [Welly](http://synbioexplorer.pythonanywhere.com)
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/synbioexplorer/welly.git
-   cd optical-density-analysis-tool
+   cd welly
    ```
 
 2. **Create a virtual environment:**
