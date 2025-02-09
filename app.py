@@ -22,7 +22,7 @@ app.config['SECRET_KEY'] = os.urandom(24)  # Random secret key for session manag
 # Configure file-based cache
 app.config['CACHE_TYPE'] = 'filesystem'
 app.config['CACHE_DIR'] = 'cache-directory'  # Directory for storing cache files
-app.config['CACHE_DEFAULT_TIMEOUT'] = 1000  # Cache timeout in seconds
+app.config['CACHE_DEFAULT_TIMEOUT'] = 4000  # Cache timeout in seconds
 
 cache = Cache(app)
 
@@ -59,6 +59,17 @@ def parse_time(time_obj):
             raise ValueError(f"Unsupported string format for time_str: {time_obj}")
     else:
         raise ValueError(f"Unsupported type for time_str: {type(time_obj)}")
+
+def natural_sort_key(label):
+    """
+    Generate a sorting key that orders well labels in natural order (e.g., A1, A2, ..., A10).
+    """
+    match = re.match(r"([A-Z]+)(\d+)", label)
+    if match:
+        # Split the label into letter and number components
+        letters, numbers = match.groups()
+        return letters, int(numbers)  # Return as (letters, numeric part)
+    return label  # If no match, return the label as is
 
 @app.route('/', methods=['GET'])
 def index():
@@ -228,7 +239,7 @@ def results():
     samples = [col for col in df.columns if col != 'Time']
 
     # Create a sorted list of unique sample names
-    unique_samples = sorted(set(samples))
+    unique_samples = sorted(set(samples), key=natural_sort_key)
 
     # Retrieve existing sample colors or initialize with pastel colors
     sample_colors = cache.get(f'sample_colors_{cache_key()}') or {}
@@ -297,7 +308,8 @@ def create_plot(df, sample_colors):
     group_df.columns = ['Time', 'Sample', 'mean_OD', 'std_OD']
 
     traces = []
-    for sample in group_df['Sample'].unique():
+    sorted_samples = sorted(group_df['Sample'].unique(), key=natural_sort_key)
+    for sample in sorted_samples:
         sample_data = group_df[group_df['Sample'] == sample]
         color = sample_colors.get(sample, string_to_pastel_color(sample))
 
@@ -366,7 +378,7 @@ def create_plot(df, sample_colors):
 def assign_well_labels(df, plate_type):
     if 'Time' not in df.columns:
         raise ValueError("Time column not found in DataFrame.")
-    
+
     # Exclude 'Time' column
     original_labels = [col for col in df.columns if col != 'Time']
     # Generate well labels
@@ -376,15 +388,15 @@ def assign_well_labels(df, plate_type):
         well_labels = [f"{chr(65 + i)}{j + 1}" for i in range(16) for j in range(24)]
     else:
         raise ValueError("Invalid plate type")
-    
+
     # Map well labels to original labels
     label_mapping = dict(zip(well_labels[:len(original_labels)], original_labels))
-    
+
     # Assign new columns
     new_columns = ['Time'] + well_labels[:len(original_labels)]
     if len(new_columns) != len(df.columns):
         raise ValueError(f"Length mismatch: DataFrame has {len(df.columns)} columns, new labels have {len(new_columns)} elements")
-    
+
     df.columns = new_columns
     return df, label_mapping
 
@@ -433,16 +445,18 @@ def calculate_max_growth_rate_per_hour(df):
 def group_replicates_and_calculate_mean_std(max_growth_rate_df):
     summary = max_growth_rate_df.groupby('Original_Sample')['Growth_rate'].agg(['mean', 'std']).reset_index()
     summary.columns = ['Sample', 'Mean_growth_rate', 'Std_growth_rate']
+    summary = summary.sort_values('Sample', key=lambda x: x.map(natural_sort_key))
+
     return summary
 
 # Step 6: Plot the max growth rates (mean ± std)
 def plot_max_growth_rate(summary, sample_colors):
     summary['Mean_growth_rate'] = summary['Mean_growth_rate'].round(3)
     summary['Std_growth_rate'] = summary['Std_growth_rate'].round(3)
-    
+
     # Create a list of colors for the samples
     colors = [sample_colors.get(sample, '#37738F') for sample in summary['Sample']]
-    
+
     fig = go.Figure([go.Bar(
         x=summary['Sample'],
         y=summary['Mean_growth_rate'],
@@ -560,6 +574,7 @@ def group_auc_by_sample(df, auc_results):
     # Round Mean_AUC and Std_AUC
     summary['Mean_AUC'] = summary['Mean_AUC'].round(3)
     summary['Std_AUC'] = summary['Std_AUC'].fillna(0).round(3)
+    summary = summary.sort_values('Original_Sample', key=lambda x: x.map(natural_sort_key))
 
     return summary
 
@@ -571,8 +586,8 @@ def plot_auc(summary, sample_colors):
     summary['Mean_AUC'] = summary['Mean_AUC'].round(3)
     summary['Std_AUC'] = summary['Std_AUC'].round(3)
 
-    # Create a list of colors for the samples
-    colors = [sample_colors.get(sample, '#37738F') for sample in summary['Original_Sample']]
+    sorted_samples = summary['Original_Sample']
+    colors = [sample_colors.get(sample, '#37738F') for sample in sorted_samples]
 
     fig = go.Figure([go.Bar(
         x=summary['Original_Sample'],
