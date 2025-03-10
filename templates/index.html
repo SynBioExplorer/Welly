@@ -216,6 +216,118 @@
                 <input type="submit" value="Upload">
             </form>
         </div>
+        <!-- Citation Section -->
+<div class="instructions">
+    <h3>If you use Welly in your research, please cite:</h3>
+    <div class="citation-box">
+        <p class="citation-text">
+            Meier F, Williams T, Paulsen I. Welly: A Web-Tool for Visualizing Growth Curves from Microplate Data. <em>Bioinformatics Advances</em>. 2025;:vbaf038. https://doi.org/10.1093/bioadv/vbaf038
+        </p>
+    </div>
+    <div class="citation-buttons">
+        <button class="citation-button" id="bibtexButton">BibTeX</button>
+        <button class="citation-button" id="risButton">RIS</button>
+        <div class="citation-format" id="bibtexFormat" style="display: none;">
+            <pre>@article{meier2025welly,
+    title={Welly: A Web-Tool for Visualizing Growth Curves from Microplate Data},
+    author={Meier, Felix and Williams, Tom and Paulsen, Ian},
+    journal={Bioinformatics Advances},
+    year={2025},
+    pages={vbaf038},
+    doi={10.1093/bioadv/vbaf038},
+    publisher={Oxford University Press}
+}</pre>
+        </div>
+        <div class="citation-format" id="risFormat" style="display: none;">
+            <pre>TY  - JOUR
+T1  - Welly: A Web-Tool for Visualizing Growth Curves from Microplate Data
+AU  - Meier, Felix
+AU  - Williams, Tom
+AU  - Paulsen, Ian
+JO  - Bioinformatics Advances
+PY  - 2025
+SP  - vbaf038
+DO  - 10.1093/bioadv/vbaf038
+ER  -</pre>
+        </div>
+    </div>
+</div>
+
+<style>
+    .citation-box {
+        background-color: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border-radius: 5px;
+        padding: 1px 6px;
+        margin: 6px 0;
+        border: 1px solid rgba(221, 221, 221, 0.5);
+        max-width: 95%;
+        display: inline-block;
+    }
+    
+    .citation-text {
+        font-size: 8px;
+        margin: 0;
+        line-height: 1.3;
+    }
+    
+    .citation-buttons {
+        display: flex;
+        flex-direction: row;
+        margin-top: 6px;
+    }
+    
+    .citation-button {
+        background-color: #f2f2f2;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        padding: 3px 8px;
+        margin: 2px 5px 2px 0;
+        cursor: pointer;
+        font-size: 11px;
+        width: 60px;
+    }
+    
+    .citation-format {
+        background-color: white;
+        border-radius: 5px;
+        padding: 10px;
+        margin: 5px 0 10px 0;
+        border: 1px solid #ddd;
+        font-size: 12px;
+        max-height: 150px;
+        overflow-y: auto;
+    }
+    
+    .citation-format pre {
+        margin: 0;
+        white-space: pre-wrap;
+    }
+</style>
+
+<script>
+    document.getElementById('bibtexButton').addEventListener('click', function() {
+        toggleFormat('bibtexFormat');
+    });
+    
+    document.getElementById('risButton').addEventListener('click', function() {
+        toggleFormat('risFormat');
+    });
+    
+    function toggleFormat(formatId) {
+        const format = document.getElementById(formatId);
+        const otherFormatId = formatId === 'bibtexFormat' ? 'risFormat' : 'bibtexFormat';
+        const otherFormat = document.getElementById(otherFormatId);
+        
+        if (format.style.display === 'none') {
+            format.style.display = 'block';
+            otherFormat.style.display = 'none';
+        } else {
+            format.style.display = 'none';
+        }
+    }
+</script>
     </div>
 </body>
 </html>
