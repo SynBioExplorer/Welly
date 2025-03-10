@@ -4,6 +4,8 @@
 ## Purpose
 Welly is a web-based application designed to facilitate the analysis of bacterial growth data from high-throughput experiments. It allows users to upload CSV or Excel files containing optical density (OD600nm) measurements over time from 96- or 384-well plates. The application processes the data to generate key metrics such as the maximum growth rate and area under the curve (AUC) for each well, and then aggregates these metrics across replicates. Welly provides interactive visualizations, including line graphs and heatmaps, to help users interpret their data effectively.
 
+## Publication:
+Felix Meier, Tom Williams, Ian Paulsen, Welly: A Web-Tool for Visualizing Growth Curves from Microplate Data, Bioinformatics Advances, 2025;, vbaf038, https://doi.org/10.1093/bioadv/vbaf038
 
 
 ## Workflow
