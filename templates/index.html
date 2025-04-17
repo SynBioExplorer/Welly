@@ -193,6 +193,8 @@
                 <a href="{{ url_for('static', filename='examples/example_data_384.csv') }}" download>384-well file</a>
                 or
                 <a href="{{ url_for('static', filename='examples/welly_user_guide.pdf') }}" download>detailed user guide</a>
+                or
+                <a href="{{ url_for('static', filename='examples/welly_demo.mp4') }}">video demonstration</a>
             </div>
 
         </div>
@@ -265,19 +267,19 @@ ER  -</pre>
         max-width: 95%;
         display: inline-block;
     }
-    
+
     .citation-text {
         font-size: 8px;
         margin: 0;
         line-height: 1.3;
     }
-    
+
     .citation-buttons {
         display: flex;
         flex-direction: row;
         margin-top: 6px;
     }
-    
+
     .citation-button {
         background-color: #f2f2f2;
         border: 1px solid #ddd;
@@ -288,7 +290,7 @@ ER  -</pre>
         font-size: 11px;
         width: 60px;
     }
-    
+
     .citation-format {
         background-color: white;
         border-radius: 5px;
@@ -299,7 +301,7 @@ ER  -</pre>
         max-height: 150px;
         overflow-y: auto;
     }
-    
+
     .citation-format pre {
         margin: 0;
         white-space: pre-wrap;
@@ -310,16 +312,16 @@ ER  -</pre>
     document.getElementById('bibtexButton').addEventListener('click', function() {
         toggleFormat('bibtexFormat');
     });
-    
+
     document.getElementById('risButton').addEventListener('click', function() {
         toggleFormat('risFormat');
     });
-    
+
     function toggleFormat(formatId) {
         const format = document.getElementById(formatId);
         const otherFormatId = formatId === 'bibtexFormat' ? 'risFormat' : 'bibtexFormat';
         const otherFormat = document.getElementById(otherFormatId);
-        
+
         if (format.style.display === 'none') {
             format.style.display = 'block';
             otherFormat.style.display = 'none';
