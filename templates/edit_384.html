@@ -61,61 +61,58 @@
     <script>
     let currentSampleName = '';
     let mouseDown = false;
+    const colorCache = {};
 
     function setCurrentSampleName() {
         currentSampleName = document.getElementById('sample-name-input').value;
-        colorizeWells(currentSampleName); // Colorize all matching wells when sample name is set
+        // Only colorize matching wells when the name changes
+        const inputs = document.getElementsByClassName('well-input');
+        const color = getPastelColor(currentSampleName);
+        for (let i = 0; i < inputs.length; i++) {
+            if (inputs[i].value === currentSampleName) {
+                inputs[i].style.backgroundColor = color;
+            }
+        }
     }
 
     function applySampleName(event) {
         if (currentSampleName && (mouseDown || event.type === 'mousedown')) {
-            event.target.value = currentSampleName;
-            colorizeWells(currentSampleName); // Colorize all matching wells
+            const el = event.target;
+            el.value = currentSampleName;
+            el.style.backgroundColor = getPastelColor(currentSampleName);
         }
     }
 
-    // Set mouseDown state true only when clicking on an input
     function mouseDownHandler(event) {
         if (event.target.classList.contains('well-input')) {
             mouseDown = true;
         }
     }
 
-    // Reset mouseDown state when mouse is released
     function mouseUpHandler() {
         mouseDown = false;
     }
 
-    function stringToPastelColor(str) {
+    function getPastelColor(str) {
+        if (colorCache[str]) return colorCache[str];
         let hash = 0;
         for (let i = 0; i < str.length; i++) {
-            hash = hash * 31 + str.charCodeAt(i); // Simple, effective hash function
-            hash = hash ^ (hash << 10); // Shift and xor to increase sensitivity to each character's position
-            hash = hash ^ (hash >> 15); // Further mix the bits
+            hash = hash * 31 + str.charCodeAt(i);
+            hash = hash ^ (hash << 10);
+            hash = hash ^ (hash >> 15);
         }
-        hash = hash & 0xfffff; // Restrict the range of the hash to reduce overly large values
-        const hue = Math.abs(hash) % 360; // Ensure the hue is within the 0-360 range
-        const saturation = 60; // Keep saturation moderate to ensure pastel colors
-        const lightness = 85; // High lightness for pastel effect
-        return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+        hash = hash & 0xfffff;
+        const hue = Math.abs(hash) % 360;
+        const color = `hsl(${hue}, 60%, 85%)`;
+        colorCache[str] = color;
+        return color;
     }
 
-    // Function to colorize all wells with the same sample name
-    function colorizeWells(sampleName) {
-        const inputs = document.getElementsByClassName('well-input');
-        for (const input of inputs) {
-            if (input.value === sampleName) {
-                input.style.backgroundColor = stringToPastelColor(sampleName);
-            }
-        }
-    }
-
-    // Initial colorization on load for pre-filled values
     window.onload = function() {
         const inputs = document.getElementsByClassName('well-input');
-        for (const input of inputs) {
-            if (input.value) {
-                input.style.backgroundColor = stringToPastelColor(input.value);
+        for (let i = 0; i < inputs.length; i++) {
+            if (inputs[i].value) {
+                inputs[i].style.backgroundColor = getPastelColor(inputs[i].value);
             }
         }
     };
@@ -123,7 +120,6 @@
     document.addEventListener('mousedown', mouseDownHandler);
     document.addEventListener('mouseup', mouseUpHandler);
 
-    // JavaScript to handle opening and closing the instruction modal
     function openGuide() {
         document.getElementById("guideModal").style.display = "block";
     }
@@ -166,7 +162,7 @@
                 <label for="use_labels">Use CSV/Excel Labels as Well Names</label>
             </div>
             
-            <table class="table">
+            <table class="table" id="well-table">
                 <thead>
                     <tr>
                         <th>Well</th>
@@ -183,24 +179,31 @@
                             {% for col in range(1, 25) %}
                                 <td>
                                     {% set well_name = row_letter + col|string %}
-                                    <input type="text" name="{{ well_name }}" class="form-control well-input" onmouseover="applySampleName(event)" onmousedown="applySampleName(event); mouseUpDown(true)" onmouseup="mouseUpDown(false)">
+                                    <input type="text" name="{{ well_name }}" class="form-control well-input">
                                 </td>
                             {% endfor %}
                         </tr>
                     {% endfor %}
                 </tbody>
             </table>
+            <script>
+            // Event delegation: single listener on the table instead of 384 inline handlers
+            (function() {
+                const table = document.getElementById('well-table');
+                table.addEventListener('mouseover', function(e) {
+                    if (e.target.classList.contains('well-input')) applySampleName(e);
+                });
+                table.addEventListener('mousedown', function(e) {
+                    if (e.target.classList.contains('well-input')) applySampleName(e);
+                });
+            })();
+            </script>
             <div class="text-center">
                 <button type="submit" class="btn btn-primary">Submit</button>
             </div>
         </form>
-        <h2>Heatmap of Maximum Values</h2>
-        <div>
-            {{ heatmap_graph | safe }}
-        </div>
-        <div style="text-align: center;">
-            <a href="{{ url_for('download_heatmap', filename='heatmap.html') }}" class="btn btn-primary">Download Heatmap</a>
-        </div>
+        <h2>Individual Well Growth Curves</h2>
+        {{ heatmap_graph | safe }}
     </div>
 </body>
 </html>

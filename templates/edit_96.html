@@ -195,14 +195,8 @@
             </div>
         </form>
 
-        <h2>Heatmap of Maximum Values</h2>
-        <div>
-            {{ heatmap_graph | safe }}
-        </div>
-        
-        <div style="text-align: center;">
-            <a href="{{ url_for('download_heatmap', filename='heatmap.html') }}" class="btn btn-primary">Download Heatmap</a>
-        </div>
+        <h2>Individual Well Growth Curves</h2>
+        {{ heatmap_graph | safe }}
     </div>
 </body>
 </html>
