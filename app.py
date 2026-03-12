@@ -157,9 +157,6 @@ def plate_selection():
         return f"Error processing file: {str(e)}. Please upload a valid CSV or Excel file.", 400
 
 
-# Initialize a dictionary to track duplicate columns
-col_tracker = defaultdict(int)
-
 # Function to handle duplicate column names with a session-specific tracker
 def handle_duplicates(col, col_tracker):
     if col == "Time":
