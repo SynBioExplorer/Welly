@@ -1,0 +1,22 @@
+name: welly
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - Flask==2.2.3
+    - Flask-Caching==2.3.0
+    - Flask-Session==0.8.0
+    - Werkzeug==2.2.3
+    - Jinja2==3.1.4
+    - MarkupSafe==2.1.5
+    - pandas==2.2.2
+    - numpy==1.23.5
+    - scipy==1.10.1
+    - plotly==5.23.0
+    - chart-studio==1.1.0
+    - openpyxl==3.1.2
+    - xlrd==2.0.1
+    - beautifulsoup4==4.12.2
+    - kaleido==0.2.1

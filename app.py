@@ -31,7 +31,12 @@ def cache_key():
         session['user_id'] = str(uuid.uuid4())  # Generate a unique ID for the session
     return f"user_{session['user_id']}"
 
-def parse_time(time_obj):
+def parse_time(time_obj, time_format='auto'):
+    if time_format == 'hours' and (isinstance(time_obj, (float, int)) or (isinstance(time_obj, str) and time_obj.replace('.', '', 1).isdigit())):
+        return float(time_obj) * 60  # Hours to minutes
+    elif time_format == 'minutes' and (isinstance(time_obj, (float, int)) or (isinstance(time_obj, str) and time_obj.replace('.', '', 1).isdigit())):
+        return float(time_obj)  # Already in minutes
+
     if isinstance(time_obj, float) or isinstance(time_obj, int):
         return float(time_obj) * 24 * 60
     elif isinstance(time_obj, pd.Timestamp):
@@ -100,7 +105,8 @@ def plate_selection():
         if 'Time' not in df.columns:
             return "The uploaded file must contain a 'Time' column.", 400
 
-        time_column = df['Time'].apply(parse_time)
+        time_format = request.form.get('timeFormat', 'auto')
+        time_column = df['Time'].apply(lambda t: parse_time(t, time_format))
         time_column = pd.to_numeric(time_column, errors='raise')
 
         df.drop(columns=['Time'], inplace=True)
@@ -151,11 +157,17 @@ def edit():
             df = df.copy()
             well_name_map = None
         else:
-            df = df.rename(columns=well_name_map)
-            if 'Time' not in df.columns:
-                raise ValueError("Time column not found in DataFrame after renaming.")
-            columns_to_keep = ['Time'] + list(well_name_map.values())
-            df = df[columns_to_keep]
+            df = df.copy()
+            original_columns = list(df.columns)
+            cols_to_keep_indices = [0]  # Time column
+            new_names = ['Time']
+            for orig_well, new_name in well_name_map.items():
+                if orig_well in original_columns:
+                    idx = original_columns.index(orig_well)
+                    cols_to_keep_indices.append(idx)
+                    new_names.append(new_name)
+            df = df.iloc[:, cols_to_keep_indices]
+            df.columns = new_names
 
         cache.set(f'renamed_data_{cache_key()}', df)
         cache.set(f'use_labels_{cache_key()}', use_labels)
@@ -251,10 +263,16 @@ def results():
     cache.set(f'sample_colors_{cache_key()}', sample_colors)
 
     # Map sanitized sample names to original sample names
+    sample_to_field_name = {}
     sanitized_to_original = {}
     for sample in unique_samples:
         sanitized_sample = re.sub(r'[^\w]', '_', sample)
-        sanitized_to_original[f'sample_color_{sanitized_sample}'] = sample
+        field_name = f'sample_color_{sanitized_sample}'
+        sample_to_field_name[sample] = field_name
+        sanitized_to_original[field_name] = sample
+
+    # Retrieve cached axis settings or defaults
+    axis_settings = cache.get(f'axis_settings_{cache_key()}') or {}
 
     if request.method == 'POST':
         # Process color selections
@@ -266,12 +284,23 @@ def results():
         # Update the cache with new colors
         cache.set(f'sample_colors_{cache_key()}', sample_colors)
 
+        # Process axis settings
+        for field in ['x_min', 'x_max', 'y_min', 'y_max']:
+            val = form_data.get(field, '').strip()
+            axis_settings[field] = float(val) if val else None
+        for field in ['x_label', 'y_label']:
+            val = form_data.get(field, '').strip()
+            axis_settings[field] = val if val else None
+        cache.set(f'axis_settings_{cache_key()}', axis_settings)
+
     # Generate the Plotly graph with the current colors
-    fig = create_plot(df, sample_colors)
+    fig = create_plot(df, sample_colors, axis_settings=axis_settings)
     plotly_graph = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
     return render_template('results.html', plotly_graph=plotly_graph, samples=samples,
-                           unique_samples=unique_samples, sample_colors=sample_colors)
+                           unique_samples=unique_samples, sample_colors=sample_colors,
+                           sample_to_field_name=sample_to_field_name,
+                           axis_settings=axis_settings)
 
 
 def string_to_pastel_color(s):
@@ -297,7 +326,7 @@ def calculate_mean_std(df):
     ).reset_index()
     return df_grouped
 
-def create_plot(df, sample_colors):
+def create_plot(df, sample_colors, axis_settings=None):
     data_columns = [col for col in df.columns if col != 'Time']
     time_values = df['Time'] / 60  # Convert time to hours if necessary
 
@@ -366,6 +395,17 @@ def create_plot(df, sample_colors):
     )
 
     fig = go.Figure(data=traces, layout=layout)
+
+    if axis_settings:
+        if axis_settings.get('x_min') is not None or axis_settings.get('x_max') is not None:
+            fig.update_xaxes(range=[axis_settings.get('x_min'), axis_settings.get('x_max')])
+        if axis_settings.get('y_min') is not None or axis_settings.get('y_max') is not None:
+            fig.update_yaxes(range=[axis_settings.get('y_min'), axis_settings.get('y_max')])
+        if axis_settings.get('x_label'):
+            fig.update_xaxes(title_text=axis_settings['x_label'])
+        if axis_settings.get('y_label'):
+            fig.update_yaxes(title_text=axis_settings['y_label'])
+
     return fig
 
 
@@ -718,16 +758,49 @@ def download_heatmap(filename):
     else:
         return "File not found.", 404
 
+@app.route('/download_growth_rate_csv')
+def download_growth_rate_csv():
+    df = cache.get(f'renamed_data_{cache_key()}')
+    if df is None:
+        return "Session expired or no data available.", 400
+
+    max_growth_rates = calculate_max_growth_rate_per_hour(df.copy())
+    summary = group_replicates_and_calculate_mean_std(max_growth_rates)
+
+    csv_data = '\ufeff' + summary.to_csv(index=False)
+    response = make_response(csv_data.encode('utf-8'))
+    response.headers['Content-Disposition'] = 'attachment; filename=growth_rate_summary.csv'
+    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    return response
+
+
+@app.route('/download_auc_csv')
+def download_auc_csv():
+    df = cache.get(f'renamed_data_{cache_key()}')
+    if df is None:
+        return "Session expired or no data available.", 400
+
+    auc_results = calculate_auc(df)
+    auc_summary = group_auc_by_sample(df, auc_results)
+    auc_summary = auc_summary.rename(columns={'Original_Sample': 'Sample'})
+
+    csv_data = '\ufeff' + auc_summary.to_csv(index=False)
+    response = make_response(csv_data.encode('utf-8'))
+    response.headers['Content-Disposition'] = 'attachment; filename=auc_summary.csv'
+    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    return response
+
+
 @app.route('/download/<string:csv_filename>')
 def download(csv_filename):
     df = cache.get(f'renamed_data_{cache_key()}')
     if df is None:
         return "Session expired or no data available.", 400
 
-    csv_data = df.to_csv(index=False)
-    response = make_response(csv_data)
+    csv_data = '\ufeff' + df.to_csv(index=False)
+    response = make_response(csv_data.encode('utf-8'))
     response.headers['Content-Disposition'] = f'attachment; filename={csv_filename}'
-    response.headers['Content-Type'] = 'text/csv'
+    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
     return response
 
 if __name__ == '__main__':

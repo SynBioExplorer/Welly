@@ -46,26 +46,41 @@
         <!-- Color Selection Form -->
         <div style="text-align: center;">
         <form method="POST">
+            <h3>Plot Settings</h3>
+            <div style="margin-bottom: 15px;">
+                <strong>Axis Settings</strong> <span style="font-size: 12px; color: #888;">(leave blank for defaults)</span>
+                <div style="display: inline-flex; gap: 15px; margin-top: 5px;">
+                    <label style="font-size: 12px;">X label <input type="text" name="x_label" value="{{ axis_settings.get('x_label', '') or '' }}" placeholder="Time (hours)" style="width: 120px;"></label>
+                    <label style="font-size: 12px;">X min <input type="number" step="any" name="x_min" value="{{ axis_settings.get('x_min', '') if axis_settings.get('x_min') is not none else '' }}" style="width: 70px;"></label>
+                    <label style="font-size: 12px;">X max <input type="number" step="any" name="x_max" value="{{ axis_settings.get('x_max', '') if axis_settings.get('x_max') is not none else '' }}" style="width: 70px;"></label>
+                </div>
+                <div style="display: inline-flex; gap: 15px; margin-top: 5px;">
+                    <label style="font-size: 12px;">Y label <input type="text" name="y_label" value="{{ axis_settings.get('y_label', '') or '' }}" placeholder="OD600nm" style="width: 120px;"></label>
+                    <label style="font-size: 12px;">Y min <input type="number" step="any" name="y_min" value="{{ axis_settings.get('y_min', '') if axis_settings.get('y_min') is not none else '' }}" style="width: 70px;"></label>
+                    <label style="font-size: 12px;">Y max <input type="number" step="any" name="y_max" value="{{ axis_settings.get('y_max', '') if axis_settings.get('y_max') is not none else '' }}" style="width: 70px;"></label>
+                </div>
+            </div>
             <h3>Select Colors for Samples</h3>
             <div class="color-picker-container">
                 <div class="color-picker-grid">
                     {% for sample in unique_samples %}
-                    {% set sanitized_sample = sample|replace(' ', '_')|replace('#', '_')|replace('.', '_')|replace('/', '_')|replace('\\', '_') %}
                     <div class="color-picker-item">
-                        <label for="sample_color_{{ sanitized_sample }}">{{ sample }}</label>
-                        <input type="color" id="sample_color_{{ sanitized_sample }}" name="sample_color_{{ sanitized_sample }}" value="{{ sample_colors[sample] | safe }}">
+                        <label for="{{ sample_to_field_name[sample] }}">{{ sample }}</label>
+                        <input type="color" id="{{ sample_to_field_name[sample] }}" name="{{ sample_to_field_name[sample] }}" value="{{ sample_colors[sample] | safe }}">
                     </div>
                     {% endfor %}
                 </div>
             </div>
             <br>
-            <button type="submit" class="btn btn-primary">Update Colors</button>
+            <button type="submit" class="btn btn-primary">Update Plot</button>
         </form>
         </div>
         <br>
         <div style="text-align: center;">
-            <a href="{{ url_for('download', csv_filename='renamed_data.csv') }}" class="btn btn-primary">Download Renamed CSV</a>
-            <a href="{{ url_for('download_report') }}" class="btn btn-primary">Download HTML Report</a>
+            <a href="{{ url_for('download', csv_filename='renamed_data.csv') }}" class="btn btn-primary">Download OD Data (CSV)</a>
+            <a href="{{ url_for('download_growth_rate_csv') }}" class="btn btn-primary">Download Growth Rate (CSV)</a>
+            <a href="{{ url_for('download_auc_csv') }}" class="btn btn-primary">Download AUC (CSV)</a>
+            <a href="{{ url_for('download_report') }}" class="btn btn-primary">Download Full Report (HTML)</a>
             <a href="{{ url_for('index') }}" class="btn btn-primary">Back to Upload</a>
         </div>
     </div>
