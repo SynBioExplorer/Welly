@@ -104,13 +104,22 @@ def parse_time(time_obj, time_format='auto'):
 def natural_sort_key(label):
     """
     Generate a sorting key that orders well labels in natural order (e.g., A1, A2, ..., A10).
+    Always returns a tuple so mixed label types can be compared.
     """
-    match = re.match(r"([A-Z]+)(\d+)", label)
+    label = str(label)
+    match = re.match(r"([A-Z]+)(\d+)$", label)
     if match:
-        # Split the label into letter and number components
         letters, numbers = match.groups()
-        return letters, int(numbers)  # Return as (letters, numeric part)
-    return label  # If no match, return the label as is
+        return (0, letters, int(numbers))
+    return (1, label, 0)
+
+@app.route('/robots.txt')
+def robots():
+    return 'User-agent: *\nAllow: /\n', 200, {'Content-Type': 'text/plain'}
+
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204
 
 @app.route('/', methods=['GET'])
 def index():
@@ -125,7 +134,27 @@ def plate_selection():
 
     try:
         if file_extension == 'csv':
+            # Try standard CSV first; fall back to European format (semicolon delimiter, comma decimal)
+            uploaded_file.seek(0)
             df = pd.read_csv(uploaded_file, header=0)
+            # Detect European comma-decimal format: if non-Time columns are strings containing commas
+            non_time_cols = [c for c in df.columns if str(c) != 'Time']
+            if non_time_cols and df[non_time_cols[0]].dtype == object:
+                sample_val = str(df[non_time_cols[0]].iloc[0])
+                if ',' in sample_val and ';' not in sample_val:
+                    # Comma-decimal CSV (but comma delimiter) — replace commas in values
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, header=0, decimal=',')
+                elif ';' in open(uploaded_file.name).read(500) if hasattr(uploaded_file, 'name') else False:
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, header=0, sep=';', decimal=',')
+            # Final fallback: try to convert any remaining comma-decimal strings
+            for col in df.columns:
+                if df[col].dtype == object and str(col) != 'Time':
+                    try:
+                        df[col] = df[col].astype(str).str.replace(',', '.', regex=False).astype(float)
+                    except (ValueError, TypeError):
+                        pass
         elif file_extension in ['xls', 'xlsx']:
             df = pd.read_excel(uploaded_file, header=0)
         else:
@@ -134,7 +163,8 @@ def plate_selection():
         # Initialize a session-specific col_tracker
         col_tracker = defaultdict(int)
 
-        # Apply the function to handle duplicate columns using this session-specific tracker
+        # Ensure all column names are strings
+        df.columns = [str(c) for c in df.columns]
         df.columns = df.columns.to_series().apply(lambda col: handle_duplicates(col, col_tracker))
         df.columns = [remove_suffixes(col) for col in df.columns]
 
@@ -153,7 +183,7 @@ def plate_selection():
         cache.set(f'plate_type_{cache_key()}', plate_type)
 
         return redirect(url_for('edit', plate_type=plate_type))
-    except (pd.errors.EmptyDataError, ValueError) as e:
+    except (pd.errors.EmptyDataError, ValueError, TypeError) as e:
         return f"Error processing file: {str(e)}. Please upload a valid CSV or Excel file.", 400
 
 
@@ -167,8 +197,7 @@ def handle_duplicates(col, col_tracker):
     return col
 
 def remove_suffixes(col_name):
-    import re
-    return re.sub(r'\.\d+$', '', col_name)
+    return re.sub(r'\.\d+$', '', str(col_name))
 
 @app.route('/edit', methods=['GET', 'POST'])
 def edit():
@@ -238,16 +267,42 @@ def edit():
 
     trace_type = go.Scattergl if plate_type == '384' else go.Scatter
 
-    for idx, col_name in enumerate(well_columns):
-        r = idx // n_cols + 1
-        c = idx % n_cols + 1
+    # Map wells to grid positions: standard labels (A1-P24) go to correct position,
+    # non-standard labels fill sequentially into remaining slots
+    well_re = re.compile(r'^([A-P])(\d{1,2})$')
+    used_positions = set()
+    well_positions = {}
+    for col_name in well_columns:
+        m = well_re.match(col_name)
+        if m:
+            r = ord(m.group(1)) - 65  # A=0, B=1, ...
+            c = int(m.group(2)) - 1   # 1-based to 0-based
+            if 0 <= r < n_rows and 0 <= c < n_cols:
+                well_positions[col_name] = (r, c)
+                used_positions.add((r, c))
+    # Non-standard labels fill sequentially into unused slots
+    next_slot = 0
+    for col_name in well_columns:
+        if col_name not in well_positions:
+            while next_slot < n_rows * n_cols and (next_slot // n_cols, next_slot % n_cols) in used_positions:
+                next_slot += 1
+            if next_slot < n_rows * n_cols:
+                pos = (next_slot // n_cols, next_slot % n_cols)
+                well_positions[col_name] = pos
+                used_positions.add(pos)
+                next_slot += 1
+
+    for col_name in well_columns:
+        if col_name not in well_positions:
+            continue  # more wells than grid slots (shouldn't happen)
+        r, c = well_positions[col_name]
         y_data = df[col_name].iloc[::step] if step > 1 else df[col_name]
         fig.add_trace(trace_type(
             x=time_ds, y=y_data,
             mode='lines', name=col_name,
             line=dict(width=1, color='#1f77b4'),
             showlegend=False
-        ), row=r, col=c)
+        ), row=r + 1, col=c + 1)
 
     # Match width to the Bootstrap container (~1100px) for both plate types
     plot_width = 1100
@@ -274,7 +329,7 @@ def edit():
     for ann in fig.layout.annotations:
         ann.font.size = 7 if plate_type == '384' else 9
 
-    wells_div = pyo.plot(fig, output_type='div', include_plotlyjs=True)
+    wells_div = pyo.plot(fig, output_type='div', include_plotlyjs='cdn')
 
     well_names = list(df.columns[1:])
     if plate_type == '96':
@@ -289,7 +344,7 @@ def edit():
 def results():
     df = cache.get(f'renamed_data_{cache_key()}')
     if df is None:
-        return redirect(url_for('upload'))
+        return redirect(url_for('index'))
 
     # Get all sample names (excluding 'Time')
     samples = [col for col in df.columns if col != 'Time']
@@ -825,17 +880,40 @@ def generate_report_sparklines(df_raw, plate_type, well_name_map=None, sample_co
     time_hours = df_raw['Time'] / 60
     well_columns = list(df_raw.columns[1:])
 
-    for idx, col_name in enumerate(well_columns):
-        r = idx // n_cols + 1
-        c = idx % n_cols + 1
-        # Look up colour: well -> sample name -> sample colour
+    # Map wells to grid positions (same logic as edit page)
+    well_re = re.compile(r'^([A-P])(\d{1,2})$')
+    used_positions = set()
+    well_positions = {}
+    for col_name in well_columns:
+        m = well_re.match(col_name)
+        if m:
+            r = ord(m.group(1)) - 65
+            c = int(m.group(2)) - 1
+            if 0 <= r < n_rows and 0 <= c < n_cols:
+                well_positions[col_name] = (r, c)
+                used_positions.add((r, c))
+    next_slot = 0
+    for col_name in well_columns:
+        if col_name not in well_positions:
+            while next_slot < n_rows * n_cols and (next_slot // n_cols, next_slot % n_cols) in used_positions:
+                next_slot += 1
+            if next_slot < n_rows * n_cols:
+                pos = (next_slot // n_cols, next_slot % n_cols)
+                well_positions[col_name] = pos
+                used_positions.add(pos)
+                next_slot += 1
+
+    for col_name in well_columns:
+        if col_name not in well_positions:
+            continue
+        r, c = well_positions[col_name]
         sample_name = well_name_map.get(col_name)
         color = sample_colors.get(sample_name, '#1f77b4') if sample_name else '#1f77b4'
         fig.add_trace(go.Scatter(
             x=time_hours, y=df_raw[col_name],
             mode='lines', showlegend=False,
             line=dict(width=1, color=color)
-        ), row=r, col=c)
+        ), row=r + 1, col=c + 1)
 
     all_od = df_raw.iloc[:, 1:]
     y_min = float(all_od.min().min())
@@ -862,13 +940,41 @@ def generate_report_heatmap(df_raw, plate_type):
     """Generate a max-OD heatmap of the plate for the report."""
     well_data = df_raw.iloc[:, 1:]
     max_values = well_data.max()
+    well_columns = list(well_data.columns)
 
     if plate_type == '96':
         rows, cols = 8, 12
     else:
         rows, cols = 16, 24
 
-    heatmap_data = max_values.values.reshape((rows, cols))
+    # Build heatmap grid, placing wells at correct positions (NaN for empty slots)
+    heatmap_data = np.full((rows, cols), np.nan)
+    well_re = re.compile(r'^([A-P])(\d{1,2})$')
+    used_positions = set()
+    well_positions = {}
+    for col_name in well_columns:
+        m = well_re.match(col_name)
+        if m:
+            r = ord(m.group(1)) - 65
+            c = int(m.group(2)) - 1
+            if 0 <= r < rows and 0 <= c < cols:
+                well_positions[col_name] = (r, c)
+                used_positions.add((r, c))
+    next_slot = 0
+    for col_name in well_columns:
+        if col_name not in well_positions:
+            while next_slot < rows * cols and (next_slot // cols, next_slot % cols) in used_positions:
+                next_slot += 1
+            if next_slot < rows * cols:
+                pos = (next_slot // cols, next_slot % cols)
+                well_positions[col_name] = pos
+                used_positions.add(pos)
+                next_slot += 1
+    for col_name in well_columns:
+        if col_name in well_positions:
+            r, c = well_positions[col_name]
+            heatmap_data[r, c] = max_values[col_name]
+
     x_labels = [str(i + 1) for i in range(cols)]
     y_labels = [chr(65 + i) for i in range(rows)]
 
@@ -905,37 +1011,37 @@ def download_report():
 
     # --- Generate all figures ---
     line_graph = create_plot(df, sample_colors, for_report=True)
-    line_graph_html = pio.to_html(line_graph, full_html=False)
+    line_graph_html = pio.to_html(line_graph, full_html=False, include_plotlyjs=False)
 
     log_growth_fig = plot_log_growth_curves(df, sample_colors)
-    log_growth_html = pio.to_html(log_growth_fig, full_html=False)
+    log_growth_html = pio.to_html(log_growth_fig, full_html=False, include_plotlyjs=False)
 
     growth_rate_kinetics_fig = plot_growth_rate_kinetics(df, sample_colors)
-    growth_rate_kinetics_html = pio.to_html(growth_rate_kinetics_fig, full_html=False)
+    growth_rate_kinetics_html = pio.to_html(growth_rate_kinetics_fig, full_html=False, include_plotlyjs=False)
 
     max_growth_rates = calculate_umax(df.copy())
     summary = group_replicates_and_calculate_mean_std(max_growth_rates)
 
     max_growth_rate_fig = plot_max_growth_rate(summary, sample_colors, panel_label='a) Maximum Specific Growth Rate (\u00b5max)')
-    max_growth_rate_html = pio.to_html(max_growth_rate_fig, full_html=False)
+    max_growth_rate_html = pio.to_html(max_growth_rate_fig, full_html=False, include_plotlyjs=False)
 
     doubling_time_fig = plot_doubling_time(summary, sample_colors, panel_label='b) Doubling Time')
-    doubling_time_html = pio.to_html(doubling_time_fig, full_html=False)
+    doubling_time_html = pio.to_html(doubling_time_fig, full_html=False, include_plotlyjs=False)
 
     lag_phase_fig = plot_lag_phase(summary, sample_colors, panel_label='c) Lag Phase')
-    lag_phase_html = pio.to_html(lag_phase_fig, full_html=False)
+    lag_phase_html = pio.to_html(lag_phase_fig, full_html=False, include_plotlyjs=False)
 
     auc_results = calculate_auc(df)
     auc_summary = group_auc_by_sample(df, auc_results)
     auc_fig = plot_auc(auc_summary, sample_colors, panel_label='d) Area Under the Curve')
-    auc_html = pio.to_html(auc_fig, full_html=False)
+    auc_html = pio.to_html(auc_fig, full_html=False, include_plotlyjs=False)
 
     # Sparkline grid and heatmap (use raw data with well labels)
     if df_raw is not None:
         sparkline_fig = generate_report_sparklines(df_raw, plate_type, well_name_map, sample_colors)
-        sparkline_html = pio.to_html(sparkline_fig, full_html=False)
+        sparkline_html = pio.to_html(sparkline_fig, full_html=False, include_plotlyjs=False)
         heatmap_fig = generate_report_heatmap(df_raw, plate_type)
-        heatmap_html = pio.to_html(heatmap_fig, full_html=False)
+        heatmap_html = pio.to_html(heatmap_fig, full_html=False, include_plotlyjs=False)
     else:
         sparkline_html = '<p>Raw data not available.</p>'
         heatmap_html = '<p>Raw data not available.</p>'
