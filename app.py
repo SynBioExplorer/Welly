@@ -348,39 +348,48 @@ def plate_selection():
 
     try:
         if file_extension == 'csv':
-            # Try standard CSV first; fall back to European format (semicolon delimiter, comma decimal)
+            # Sniff the header line to pick the delimiter before reading.
+            # Supports: standard comma CSVs, European semicolon-delimited CSVs, and
+            # comma-delimited CSVs that use comma as the decimal separator.
             uploaded_file.seek(0)
-            df = pd.read_csv(uploaded_file, header=0)
-            # Detect European comma-decimal format: if non-Time columns are strings containing commas
-            non_time_cols = [c for c in df.columns if str(c) != 'Time']
-            if non_time_cols and df[non_time_cols[0]].dtype == object:
-                sample_val = str(df[non_time_cols[0]].iloc[0])
-                if ',' in sample_val and ';' not in sample_val:
-                    # Comma-decimal CSV (but comma delimiter) — replace commas in values
-                    uploaded_file.seek(0)
-                    df = pd.read_csv(uploaded_file, header=0, decimal=',')
-                elif ';' in open(uploaded_file.name).read(500) if hasattr(uploaded_file, 'name') else False:
-                    uploaded_file.seek(0)
-                    df = pd.read_csv(uploaded_file, header=0, sep=';', decimal=',')
-            # Final fallback: try to convert any remaining comma-decimal strings
+            head = uploaded_file.read(500)
+            uploaded_file.seek(0)
+            if isinstance(head, bytes):
+                head = head.decode('utf-8', errors='replace')
+            first_line = head.split('\n', 1)[0]
+            if ';' in first_line and ',' not in first_line:
+                df = pd.read_csv(uploaded_file, header=0, sep=';', decimal=',')
+            else:
+                df = pd.read_csv(uploaded_file, header=0)
+                # Handle the rare case where a comma-delimited CSV uses commas as decimals
+                # in the data (ambiguous; only triggered when data columns read as strings).
+                non_time_cols = [c for c in df.columns if str(c) != 'Time']
+                if non_time_cols and df[non_time_cols[0]].dtype == object:
+                    sample_val = str(df[non_time_cols[0]].iloc[0])
+                    if ',' in sample_val:
+                        uploaded_file.seek(0)
+                        df = pd.read_csv(uploaded_file, header=0, decimal=',')
+            # Final fallback: convert any lingering comma-decimal strings
             for col in df.columns:
                 if df[col].dtype == object and str(col) != 'Time':
                     try:
                         df[col] = df[col].astype(str).str.replace(',', '.', regex=False).astype(float)
                     except (ValueError, TypeError):
                         pass
-        elif file_extension in ['xls', 'xlsx']:
-            df = pd.read_excel(uploaded_file, header=0)
+        elif file_extension == 'xlsx':
+            df = pd.read_excel(uploaded_file, header=0, engine='openpyxl')
+        elif file_extension == 'xls':
+            df = pd.read_excel(uploaded_file, header=0, engine='xlrd')
         else:
             return "Unsupported file format. Please upload a CSV or Excel file.", 400
 
-        # Initialize a session-specific col_tracker
+        # Normalise column names, then deduplicate.
+        # Order matters: remove pandas-auto-added `.N` suffixes FIRST, then run handle_duplicates
+        # so any resulting collisions get proper `_1`, `_2` suffixes. Reversing this order
+        # re-creates duplicates and later crashes the report heatmap.
+        df.columns = [remove_suffixes(str(c)) for c in df.columns]
         col_tracker = defaultdict(int)
-
-        # Ensure all column names are strings
-        df.columns = [str(c) for c in df.columns]
         df.columns = df.columns.to_series().apply(lambda col: handle_duplicates(col, col_tracker))
-        df.columns = [remove_suffixes(col) for col in df.columns]
 
         if 'Time' not in df.columns:
             return "The uploaded file must contain a 'Time' column.", 400
@@ -1044,7 +1053,15 @@ def plot_growth_rate_kinetics(df, sample_colors):
                 'mu': slope
             })
 
-    kinetics_df = pd.DataFrame(kinetics_rows)
+    # Explicit columns so an empty kinetics_rows still yields a valid DataFrame.
+    # Happens when every sample has fewer than `window` timepoints.
+    kinetics_df = pd.DataFrame(kinetics_rows, columns=['Time', 'Sample', 'mu'])
+    if kinetics_df.empty:
+        fig = go.Figure()
+        fig.update_xaxes(title_text='Time (hours)')
+        fig.update_yaxes(title_text='µ (h⁻¹)')
+        apply_pub_style(fig, width=1100, height=500)
+        return fig
     grouped = kinetics_df.groupby(['Time', 'Sample']).agg(
         mean_mu=('mu', 'mean'),
         std_mu=('mu', 'std')
