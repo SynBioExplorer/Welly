@@ -16,6 +16,7 @@ from scipy.integrate import trapz
 import hashlib
 import re
 import io
+import json
 
 app = Flask(__name__)
 
@@ -113,6 +114,219 @@ def natural_sort_key(label):
         return (0, letters, int(numbers))
     return (1, label, 0)
 
+
+# =============================================================================
+# Blank subtraction
+# =============================================================================
+
+_PLATE_BOUNDS = {'96': (8, 12), '384': (16, 24)}
+
+
+def _plate_bounds(plate_type):
+    bounds = _PLATE_BOUNDS.get(str(plate_type))
+    if bounds is None:
+        raise ValueError(f"Unknown plate_type: {plate_type!r}")
+    return bounds
+
+
+def _split_well(token, max_row, max_col):
+    m = re.match(r'^([A-Z])([0-9]+)$', token)
+    if not m:
+        raise ValueError(f"Invalid well label: {token!r}")
+    row = ord(m.group(1)) - 65
+    col = int(m.group(2)) - 1
+    if not (0 <= row < max_row and 0 <= col < max_col):
+        raise ValueError(f"Well {token} is out of bounds for {max_row}x{max_col} plate")
+    return row, col
+
+
+def parse_well_range(spec, plate_type):
+    """
+    Parse a well-range spec into a list of canonical well labels.
+
+    Accepts: 'A1', 'A1, A2, A3', 'A1-A12' (row strip), 'A1-H1' (column strip).
+    Case-insensitive; whitespace trimmed. Empty tokens (trailing commas) are skipped.
+
+    Rejects: out-of-bounds wells, malformed tokens, mixed row+column ranges (e.g. 'A1-C3').
+    """
+    max_row, max_col = _plate_bounds(plate_type)
+
+    if not spec or not str(spec).strip():
+        raise ValueError("Empty well range")
+
+    out = []
+    for raw in str(spec).split(','):
+        token = raw.strip().upper()
+        if not token:
+            continue
+        if '-' in token:
+            parts = token.split('-')
+            if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+                raise ValueError(f"Malformed range: {raw!r}")
+            s_row, s_col = _split_well(parts[0].strip(), max_row, max_col)
+            e_row, e_col = _split_well(parts[1].strip(), max_row, max_col)
+            if s_row == e_row:
+                lo, hi = sorted([s_col, e_col])
+                out.extend(f"{chr(65 + s_row)}{c + 1}" for c in range(lo, hi + 1))
+            elif s_col == e_col:
+                lo, hi = sorted([s_row, e_row])
+                out.extend(f"{chr(65 + r)}{s_col + 1}" for r in range(lo, hi + 1))
+            else:
+                raise ValueError(
+                    f"Mixed row+column range not supported: {raw!r} "
+                    "(use comma-list or paint mode instead)"
+                )
+        else:
+            r, c = _split_well(token, max_row, max_col)
+            out.append(f"{chr(65 + r)}{c + 1}")
+
+    if not out:
+        raise ValueError("Empty well range")
+
+    # Deduplicate while preserving order
+    seen = set()
+    deduped = []
+    for w in out:
+        if w not in seen:
+            seen.add(w)
+            deduped.append(w)
+    return deduped
+
+
+def compute_blank_trace(df, group):
+    """
+    Return a 1D numpy array of length n_timepoints representing the blank to subtract.
+
+    source_type='value' -> constant trace of shape (n,)
+    source_type='wells' -> np.nanmean across the given wells at each timepoint (time-matched)
+    """
+    n = len(df)
+    stype = group.get('source_type')
+    if stype == 'value':
+        val = float(group.get('source_value'))
+        return np.full(n, val, dtype=float)
+    if stype == 'wells':
+        wells = group.get('source_wells') or []
+        if not wells:
+            raise ValueError("Blank group has no source wells")
+        missing = [w for w in wells if w not in df.columns]
+        if missing:
+            raise ValueError(f"Source wells not found in data: {missing}")
+        # Time-matched: blank at time t = mean across source wells at time t.
+        # Captures baseline drift (evaporation, media darkening) over long runs.
+        return np.asarray(np.nanmean(df[wells].values, axis=1), dtype=float)
+    raise ValueError(f"Unknown source_type: {stype!r}")
+
+
+def apply_blank_subtraction(df, config, plate_type):
+    """
+    Apply all enabled blank groups to df. Returns a new DataFrame; does not mutate input.
+    If config is None, disabled, or has no groups, returns a copy unchanged.
+    Applies negative_policy ('clip_zero' default, or 'allow') at the end.
+    """
+    if not config or not config.get('enabled'):
+        return df.copy()
+    groups = config.get('groups') or []
+    if not groups:
+        return df.copy()
+
+    out = df.copy()
+    for group in groups:
+        trace = compute_blank_trace(out, group)
+        for target in group.get('target_wells') or []:
+            if target not in out.columns:
+                continue
+            out[target] = out[target].values - trace
+
+    if config.get('negative_policy', 'clip_zero') == 'clip_zero':
+        data_cols = [c for c in out.columns if c != 'Time']
+        out[data_cols] = out[data_cols].clip(lower=0)
+    return out
+
+
+def validate_blank_config(config, df, plate_type):
+    """
+    Return a list of human-readable error strings. Empty list means valid.
+    """
+    if not config or not config.get('enabled'):
+        return []
+
+    errors = []
+    groups = config.get('groups') or []
+    if not groups:
+        errors.append("Blank subtraction is enabled but no groups are configured.")
+        return errors
+
+    all_columns = set(df.columns)
+    seen_targets = {}
+
+    for idx, group in enumerate(groups):
+        label = group.get('label') or f"Group {idx + 1}"
+        stype = group.get('source_type')
+
+        if stype == 'value':
+            val = group.get('source_value')
+            if val is None or val == '':
+                errors.append(f"{label}: source value is missing.")
+            else:
+                try:
+                    v = float(val)
+                    if v < 0:
+                        errors.append(f"{label}: source value must be >= 0 (got {v}).")
+                except (ValueError, TypeError):
+                    errors.append(f"{label}: source value '{val}' is not numeric.")
+        elif stype == 'wells':
+            wells = group.get('source_wells') or []
+            if not wells:
+                errors.append(f"{label}: no source wells specified.")
+            else:
+                missing = [w for w in wells if w not in all_columns]
+                if missing:
+                    errors.append(f"{label}: source wells not found in data: {', '.join(missing)}.")
+                for w in wells:
+                    if w in all_columns and df[w].isna().all():
+                        errors.append(f"{label}: source well {w} is entirely NaN.")
+        else:
+            errors.append(f"{label}: unknown source type '{stype}'.")
+
+        targets = group.get('target_wells') or []
+        if not targets:
+            errors.append(f"{label}: no target wells specified.")
+        missing = [t for t in targets if t not in all_columns]
+        if missing:
+            errors.append(f"{label}: target wells not found in data: {', '.join(missing)}.")
+
+        for t in targets:
+            prev = seen_targets.get(t)
+            if prev is not None and prev != label:
+                errors.append(f"Well {t} is a target of both '{prev}' and '{label}'.")
+            seen_targets[t] = label
+
+    return errors
+
+
+def build_blank_provenance_header(config):
+    """
+    Return a single-line '# Blank subtraction: ...' header describing the applied config.
+    Suitable for prepending to CSV exports.
+    """
+    if not config or not config.get('enabled') or not (config.get('groups') or []):
+        return '# Blank subtraction: none'
+    parts = []
+    for idx, group in enumerate(config.get('groups') or []):
+        label = group.get('label') or f"Group {idx + 1}"
+        if group.get('source_type') == 'value':
+            src = f"{group.get('source_value')}"
+        else:
+            wells = group.get('source_wells') or []
+            src = f"mean({','.join(wells)})" if wells else "mean(<none>)"
+        targets = group.get('target_wells') or []
+        tgt = ','.join(targets) if targets else '<none>'
+        parts.append(f"{label} = {src} -> {tgt}")
+    policy = config.get('negative_policy', 'clip_zero')
+    return f"# Blank subtraction applied: {'; '.join(parts)}; negative policy = {policy}"
+
+
 @app.route('/robots.txt')
 def robots():
     return 'User-agent: *\nAllow: /\n', 200, {'Content-Type': 'text/plain'}
@@ -208,34 +422,55 @@ def edit():
     if df is None:
         return "Session expired or no data available.", 400
 
+    blank_config = cache.get(f'blank_config_{cache_key()}')
+    blank_errors = []
+
     if request.method == 'POST':
         form_data = request.form.to_dict()
         use_labels = form_data.pop('use_labels', 'no')
 
-        form_data.pop('Time', None)
-        well_name_map = {k: v for k, v in form_data.items() if v.strip() != ''}
+        # Parse blank-subtraction config (JSON from hidden input populated by the panel JS)
+        blank_config_json = form_data.pop('blank_config_json', None)
+        if blank_config_json:
+            try:
+                blank_config = json.loads(blank_config_json)
+            except json.JSONDecodeError:
+                print(f"Malformed blank_config_json received: {blank_config_json[:200]!r}")
+                blank_config = None
 
-        if use_labels == 'yes':
-            df = df.copy()
-            well_name_map = None
-        else:
-            df = df.copy()
-            original_columns = list(df.columns)
-            cols_to_keep_indices = [0]  # Time column
-            new_names = ['Time']
-            for orig_well, new_name in well_name_map.items():
-                if orig_well in original_columns:
-                    idx = original_columns.index(orig_well)
-                    cols_to_keep_indices.append(idx)
-                    new_names.append(new_name)
-            df = df.iloc[:, cols_to_keep_indices]
-            df.columns = new_names
+        apply_cfg = blank_config if (blank_config and use_labels != 'yes') else None
+        if apply_cfg:
+            blank_errors = validate_blank_config(apply_cfg, df, plate_type)
 
-        cache.set(f'renamed_data_{cache_key()}', df)
-        cache.set(f'use_labels_{cache_key()}', use_labels)
-        cache.set(f'well_name_map_{cache_key()}', well_name_map)
+        if not blank_errors:
+            df_work = df.copy()
+            if apply_cfg:
+                df_work = apply_blank_subtraction(df_work, apply_cfg, plate_type)
+            cache.set(f'blank_config_{cache_key()}', blank_config)
 
-        return redirect(url_for('results'))
+            form_data.pop('Time', None)
+            well_name_map = {k: v for k, v in form_data.items() if v.strip() != ''}
+
+            if use_labels == 'yes':
+                well_name_map = None
+            else:
+                original_columns = list(df_work.columns)
+                cols_to_keep_indices = [0]  # Time column
+                new_names = ['Time']
+                for orig_well, new_name in well_name_map.items():
+                    if orig_well in original_columns:
+                        idx = original_columns.index(orig_well)
+                        cols_to_keep_indices.append(idx)
+                        new_names.append(new_name)
+                df_work = df_work.iloc[:, cols_to_keep_indices]
+                df_work.columns = new_names
+
+            cache.set(f'renamed_data_{cache_key()}', df_work)
+            cache.set(f'use_labels_{cache_key()}', use_labels)
+            cache.set(f'well_name_map_{cache_key()}', well_name_map)
+
+            return redirect(url_for('results'))
+        # Validation failed: fall through to render the edit page again with errors displayed.
 
     # Generate individual well growth curves as a subplot grid matching the plate layout
     if plate_type == '96':
@@ -332,10 +567,19 @@ def edit():
     wells_div = pyo.plot(fig, output_type='div', include_plotlyjs='cdn')
 
     well_names = list(df.columns[1:])
+    blank_config_json_str = json.dumps(blank_config) if blank_config else 'null'
+    template_kwargs = dict(
+        well_names=well_names,
+        heatmap_graph=wells_div,
+        use_labels=use_labels,
+        blank_config_json=blank_config_json_str,
+        blank_errors=blank_errors,
+        plate_type=plate_type,
+    )
     if plate_type == '96':
-        return render_template('edit_96.html', well_names=well_names, heatmap_graph=wells_div, use_labels=use_labels)
+        return render_template('edit_96.html', **template_kwargs)
     elif plate_type == '384':
-        return render_template('edit_384.html', well_names=well_names, heatmap_graph=wells_div, use_labels=use_labels)
+        return render_template('edit_384.html', **template_kwargs)
 
 # app.py
 
@@ -1009,6 +1253,13 @@ def download_report():
     sample_colors = cache.get(f'sample_colors_{cache_key()}') or {}
     well_name_map = cache.get(f'well_name_map_{cache_key()}') or {}
 
+    # Apply blank subtraction to df_raw so the per-well sparklines and heatmap match
+    # the corrected data used for every other figure. Same bypass rule as /edit:
+    # labelled-mode skips subtraction entirely.
+    blank_cfg = cache.get(f'blank_config_{cache_key()}')
+    if df_raw is not None and blank_cfg and cache.get(f'use_labels_{cache_key()}') != 'yes':
+        df_raw = apply_blank_subtraction(df_raw, blank_cfg, plate_type)
+
     # --- Generate all figures ---
     line_graph = create_plot(df, sample_colors, for_report=True)
     line_graph_html = pio.to_html(line_graph, full_html=False, include_plotlyjs=False)
@@ -1267,8 +1518,12 @@ def download_growth_rate_csv():
     max_growth_rates = calculate_umax(df.copy())
     summary = group_replicates_and_calculate_mean_std(max_growth_rates)
 
+    blank_cfg = cache.get(f'blank_config_{cache_key()}')
+    if cache.get(f'use_labels_{cache_key()}') == 'yes':
+        blank_cfg = None  # labelled-mode bypass: nothing was applied
+    provenance = build_blank_provenance_header(blank_cfg) + '\n'
     formula = '# umax = max slope of ln(OD) vs time (5-point window). Doubling time = ln(2)/umax. Lag phase = tangent intercept method.\n'
-    csv_data = '\ufeff' + formula + summary.to_csv(index=False)
+    csv_data = '\ufeff' + provenance + formula + summary.to_csv(index=False)
     response = make_response(csv_data.encode('utf-8'))
     response.headers['Content-Disposition'] = 'attachment; filename=umax_summary.csv'
     response.headers['Content-Type'] = 'text/csv; charset=utf-8'
@@ -1285,8 +1540,12 @@ def download_auc_csv():
     auc_summary = group_auc_by_sample(df, auc_results)
     auc_summary = auc_summary.rename(columns={'Original_Sample': 'Sample'})
 
+    blank_cfg = cache.get(f'blank_config_{cache_key()}')
+    if cache.get(f'use_labels_{cache_key()}') == 'yes':
+        blank_cfg = None  # labelled-mode bypass: nothing was applied
+    provenance = build_blank_provenance_header(blank_cfg) + '\n'
     formula = '# AUC = area under the OD vs time (hours) curve, calculated using the trapezoidal rule. Units: OD*h\n'
-    csv_data = '\ufeff' + formula + auc_summary.to_csv(index=False)
+    csv_data = '\ufeff' + provenance + formula + auc_summary.to_csv(index=False)
     response = make_response(csv_data.encode('utf-8'))
     response.headers['Content-Disposition'] = 'attachment; filename=auc_summary.csv'
     response.headers['Content-Type'] = 'text/csv; charset=utf-8'
@@ -1299,7 +1558,11 @@ def download(csv_filename):
     if df is None:
         return "Session expired or no data available.", 400
 
-    csv_data = '\ufeff' + df.to_csv(index=False)
+    blank_cfg = cache.get(f'blank_config_{cache_key()}')
+    if cache.get(f'use_labels_{cache_key()}') == 'yes':
+        blank_cfg = None  # labelled-mode bypass: nothing was applied
+    provenance = build_blank_provenance_header(blank_cfg) + '\n'
+    csv_data = '\ufeff' + provenance + df.to_csv(index=False)
     response = make_response(csv_data.encode('utf-8'))
     response.headers['Content-Disposition'] = f'attachment; filename={csv_filename}'
     response.headers['Content-Type'] = 'text/csv; charset=utf-8'

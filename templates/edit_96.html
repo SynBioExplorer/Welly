@@ -16,41 +16,151 @@
             line-height: 40px;
         }
 
-        /* Modal styles */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1;
-            padding-top: 60px;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            overflow: auto;
-            background-color: rgb(0,0,0);
-            background-color: rgba(0,0,0,0.4);
+        .instructions-panel {
+            background-color: #d9edf7;
+            border: 1px solid #bce8f1;
+            color: #31708f;
+            border-radius: 4px;
+            padding: 15px 20px;
+            margin-bottom: 20px;
         }
-
-        .modal-content {
-            background-color: #fefefe;
-            margin: 5% auto;
-            padding: 20px;
-            border: 1px solid #888;
-            width: 80%;
-        }
-
-        .close {
-            color: #aaa;
-            float: right;
-            font-size: 28px;
+        .instructions-panel h4 {
+            margin-top: 0;
             font-weight: bold;
         }
+        .instructions-panel ol {
+            margin-bottom: 5px;
+            padding-left: 20px;
+        }
+        .instructions-panel li {
+            margin-bottom: 4px;
+        }
 
-        .close:hover,
-        .close:focus {
-            color: black;
-            text-decoration: none;
+        /* Blank subtraction panel */
+        .blank-panel {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            transition: opacity 0.2s;
+        }
+        .blank-panel.disabled { opacity: 0.45; pointer-events: none; }
+        .blank-panel-header {
+            padding: 10px 15px;
             cursor: pointer;
+            user-select: none;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .blank-panel-header .toggle-icon::before { content: "\25B6"; margin-right: 8px; font-size: 10px; }
+        .blank-panel.expanded .blank-panel-header .toggle-icon::before { content: "\25BC"; }
+        .blank-panel-body { display: none; padding: 10px 15px 15px 15px; border-top: 1px solid #ddd; }
+        .blank-panel.expanded .blank-panel-body { display: block; }
+        .blank-group {
+            background-color: #fff;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+        }
+        .blank-group-header { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+        .blank-group-remove {
+            margin-left: auto; background: none; border: none;
+            color: #a00; font-size: 18px; cursor: pointer; padding: 0 6px;
+        }
+        .blank-group-remove:hover { color: #f00; }
+        .blank-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+        .blank-row > label { min-width: 80px; margin: 0; font-weight: normal; }
+        .blank-row input[type="text"], .blank-row input[type="number"] { flex: 1; }
+        .paint-btn { min-width: 120px; }
+        .paint-btn.active { background-color: #337ab7; color: #fff; border-color: #2e6da4; }
+        .blank-hint { font-size: 11px; color: #666; margin: 4px 0 8px 0; }
+        .blank-errors {
+            background-color: #f2dede;
+            border: 1px solid #ebccd1;
+            color: #a94442;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            border-radius: 3px;
+        }
+        .blank-errors ul { margin: 4px 0 0 0; padding-left: 20px; }
+        .blank-inline-err { color: #a94442; font-size: 11px; min-height: 14px; }
+
+        /* Visual language for wells involved in blank subtraction.
+           Each of up to 6 blank groups gets a distinct ring colour (source wells) AND
+           a distinct fill pattern (target wells). Groups 7+ cycle through the same palette. */
+
+        /* Source (ring) — coloured outline on wells used to compute the blank. */
+        .well-input.blank-source-g0  { outline: 2px solid #1f77b4; outline-offset: -2px; }
+        .well-input.blank-source-g1  { outline: 2px solid #2ca02c; outline-offset: -2px; }
+        .well-input.blank-source-g2  { outline: 2px solid #9467bd; outline-offset: -2px; }
+        .well-input.blank-source-g3  { outline: 2px solid #d62728; outline-offset: -2px; }
+        .well-input.blank-source-g4  { outline: 2px solid #ff7f0e; outline-offset: -2px; }
+        .well-input.blank-source-g5  { outline: 2px solid #17becf; outline-offset: -2px; }
+        .well-input.blank-source-g6  { outline: 2px solid #e7ba52; outline-offset: -2px; }
+        .well-input.blank-source-g7  { outline: 2px solid #8c564b; outline-offset: -2px; }
+        .well-input.blank-source-g8  { outline: 2px solid #e377c2; outline-offset: -2px; }
+        .well-input.blank-source-g9  { outline: 2px solid #7b6ffb; outline-offset: -2px; }
+        .well-input.blank-source-g10 { outline: 2px solid #bcbd22; outline-offset: -2px; }
+        .well-input.blank-source-g11 { outline: 2px solid #d63384; outline-offset: -2px; }
+
+        /* Target (pattern) — fill pattern on wells that have the blank subtracted. */
+        .well-input.blank-target-g0 {
+            background-image: repeating-linear-gradient(45deg, rgba(31, 119, 180, 0.30) 0 4px, transparent 4px 8px);
+        }
+        .well-input.blank-target-g1 {
+            background-image:
+                repeating-linear-gradient(45deg, rgba(44, 160, 44, 0.22) 0 2px, transparent 2px 6px),
+                repeating-linear-gradient(-45deg, rgba(44, 160, 44, 0.22) 0 2px, transparent 2px 6px);
+        }
+        .well-input.blank-target-g2 {
+            background-image: repeating-linear-gradient(0deg, rgba(148, 103, 189, 0.30) 0 4px, transparent 4px 8px);
+        }
+        .well-input.blank-target-g3 {
+            background-image: radial-gradient(circle, rgba(214, 39, 40, 0.38) 1.6px, transparent 2px);
+            background-size: 7px 7px;
+        }
+        .well-input.blank-target-g4 {
+            background-image: repeating-linear-gradient(90deg, rgba(255, 127, 14, 0.30) 0 4px, transparent 4px 8px);
+        }
+        .well-input.blank-target-g5 {
+            background-image: repeating-linear-gradient(-45deg, rgba(23, 190, 207, 0.32) 0 4px, transparent 4px 8px);
+        }
+        /* g6 — gold, checkerboard */
+        .well-input.blank-target-g6 {
+            background-image:
+                linear-gradient(45deg,  rgba(231, 186, 82, 0.45) 25%, transparent 25%, transparent 75%, rgba(231, 186, 82, 0.45) 75%),
+                linear-gradient(-45deg, rgba(231, 186, 82, 0.45) 25%, transparent 25%, transparent 75%, rgba(231, 186, 82, 0.45) 75%);
+            background-size: 8px 8px;
+            background-position: 0 0, 4px 4px;
+        }
+        /* g7 — brown, 30° stripes */
+        .well-input.blank-target-g7 {
+            background-image: repeating-linear-gradient(30deg, rgba(140, 86, 75, 0.32) 0 4px, transparent 4px 8px);
+        }
+        /* g8 — pink, 60° stripes */
+        .well-input.blank-target-g8 {
+            background-image: repeating-linear-gradient(60deg, rgba(227, 119, 194, 0.30) 0 4px, transparent 4px 8px);
+        }
+        /* g9 — indigo, fine grid (0°+90°) */
+        .well-input.blank-target-g9 {
+            background-image:
+                linear-gradient(0deg,  rgba(123, 111, 251, 0.38) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(123, 111, 251, 0.38) 1px, transparent 1px);
+            background-size: 6px 6px;
+        }
+        /* g10 — olive, large dots */
+        .well-input.blank-target-g10 {
+            background-image: radial-gradient(circle, rgba(188, 189, 34, 0.45) 2.2px, transparent 2.5px);
+            background-size: 10px 10px;
+        }
+        /* g11 — crimson, diamond (30°+150° cross) */
+        .well-input.blank-target-g11 {
+            background-image:
+                repeating-linear-gradient(30deg,  rgba(214, 51, 132, 0.25) 0 2px, transparent 2px 7px),
+                repeating-linear-gradient(150deg, rgba(214, 51, 132, 0.25) 0 2px, transparent 2px 7px);
         }
     </style>
     
@@ -65,6 +175,8 @@
     }
 
     function applySampleName(event) {
+        // Yield to blank-subtraction paint mode if active
+        if (window.blankState && window.blankState.paintMode && window.blankState.paintMode.active) return;
         if (currentSampleName && (mouseDown || event.type === 'mousedown')) {
             event.target.value = currentSampleName;
             colorizeWells(currentSampleName); // Colorize all matching wells
@@ -120,40 +232,401 @@
     document.addEventListener('mousedown', mouseDownHandler);
     document.addEventListener('mouseup', mouseUpHandler);
 
-    // JavaScript to handle opening and closing the instruction modal
-    function openGuide() {
-        document.getElementById("guideModal").style.display = "block";
+    // ===========================================================
+    // Blank subtraction — state, UI, and paint-mode integration
+    // ===========================================================
+    window.BLANK_PLATE_TYPE = '{{ plate_type | default("96") }}';
+    window.BLANK_PLATE_BOUNDS = window.BLANK_PLATE_TYPE === '384'
+        ? {rows: 16, cols: 24}
+        : {rows: 8, cols: 12};
+
+    window.blankState = (function () {
+        var initial = {{ blank_config_json | default("null") | safe }};
+        if (!initial || typeof initial !== 'object') {
+            return {
+                enabled: false, negative_policy: 'clip_zero',
+                groups: [], paintMode: {active: false, groupId: null, field: null}
+            };
+        }
+        return {
+            enabled: !!initial.enabled,
+            negative_policy: initial.negative_policy || 'clip_zero',
+            groups: (initial.groups || []).map(function (g) {
+                return {
+                    id: g.id || ('g' + Math.random().toString(36).slice(2, 8)),
+                    label: g.label || '',
+                    source_type: g.source_type || 'wells',
+                    source_wells: Array.isArray(g.source_wells) ? g.source_wells.slice() : [],
+                    source_value: g.source_value == null ? '' : g.source_value,
+                    target_wells: Array.isArray(g.target_wells) ? g.target_wells.slice() : []
+                };
+            }),
+            paintMode: {active: false, groupId: null, field: null}
+        };
+    })();
+
+    function nextBlankGroupId() { return 'g' + Math.random().toString(36).slice(2, 8); }
+
+    function toggleBlankPanel() { document.getElementById('blank-panel').classList.toggle('expanded'); }
+
+    function onBlankEnableChange(cb) {
+        window.blankState.enabled = cb.checked;
+        if (cb.checked) document.getElementById('blank-panel').classList.add('expanded');
+        repaintBlankOverlays();
     }
 
-    function closeGuide() {
-        document.getElementById("guideModal").style.display = "none";
+    function onNegPolicyChange(radio) { window.blankState.negative_policy = radio.value; }
+
+    function addBlankGroup() {
+        window.blankState.groups.push({
+            id: nextBlankGroupId(), label: '', source_type: 'wells',
+            source_wells: [], source_value: '', target_wells: []
+        });
+        if (!window.blankState.enabled) {
+            window.blankState.enabled = true;
+            var cb = document.getElementById('blank-enable-cb');
+            if (cb) cb.checked = true;
+        }
+        document.getElementById('blank-panel').classList.add('expanded');
+        renderBlankGroups();
+        repaintBlankOverlays();
     }
+
+    function removeBlankGroup(id) {
+        window.blankState.groups = window.blankState.groups.filter(function (g) { return g.id !== id; });
+        if (window.blankState.paintMode.groupId === id) exitPaintMode();
+        renderBlankGroups();
+        repaintBlankOverlays();
+    }
+
+    function onGroupFieldChange(id, field, value) {
+        var group = window.blankState.groups.find(function (g) { return g.id === id; });
+        if (!group) return;
+        if (field === 'label') group.label = value;
+        else if (field === 'source_type') group.source_type = value;
+        else if (field === 'source_value') group.source_value = value;
+        else if (field === 'source_wells_text') {
+            try { group.source_wells = parseRangeClient(value, window.BLANK_PLATE_TYPE); group._source_err = null; }
+            catch (e) { group._source_err = e.message; group.source_wells = []; }
+        } else if (field === 'target_wells_text') {
+            try { group.target_wells = parseRangeClient(value, window.BLANK_PLATE_TYPE); group._target_err = null; }
+            catch (e) { group._target_err = e.message; group.target_wells = []; }
+        }
+        var card = document.querySelector('.blank-group[data-id="' + id + '"]');
+        if (card) {
+            var se = card.querySelector('.source-err');
+            if (se) se.textContent = group._source_err || '';
+            var te = card.querySelector('.target-err');
+            if (te) te.textContent = group._target_err || '';
+        }
+        repaintBlankOverlays();
+    }
+
+    function escapeAttr(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function renderBlankGroups() {
+        var container = document.getElementById('blank-groups-container');
+        if (!container) return;
+        var html = '';
+        window.blankState.groups.forEach(function (g, idx) {
+            var painting = function (field) {
+                return window.blankState.paintMode.active
+                    && window.blankState.paintMode.groupId === g.id
+                    && window.blankState.paintMode.field === field;
+            };
+            html += '<div class="blank-group" data-id="' + g.id + '">';
+            html +=   '<div class="blank-group-header">';
+            html +=     '<strong>Blank ' + (idx + 1) + '</strong>';
+            html +=     '<input type="text" class="form-control input-sm" placeholder="Label (optional, e.g. YPD blank)" style="max-width:300px" value="' + escapeAttr(g.label) + '" oninput="onGroupFieldChange(\'' + g.id + '\', \'label\', this.value)">';
+            html +=     '<button type="button" class="blank-group-remove" title="Remove" onclick="removeBlankGroup(\'' + g.id + '\')">&times;</button>';
+            html +=   '</div>';
+            html +=   '<div class="blank-row">';
+            html +=     '<label>Source:</label>';
+            html +=     '<label style="font-weight:normal"><input type="radio" name="src_type_' + g.id + '" value="value" ' + (g.source_type === 'value' ? 'checked' : '') + ' onchange="onGroupFieldChange(\'' + g.id + '\', \'source_type\', \'value\'); renderBlankGroups()"> Value</label>';
+            html +=     '<label style="font-weight:normal"><input type="radio" name="src_type_' + g.id + '" value="wells" ' + (g.source_type === 'wells' ? 'checked' : '') + ' onchange="onGroupFieldChange(\'' + g.id + '\', \'source_type\', \'wells\'); renderBlankGroups()"> Wells (mean)</label>';
+            html +=   '</div>';
+            if (g.source_type === 'value') {
+                html += '<div class="blank-row">';
+                html +=   '<label>Value:</label>';
+                html +=   '<input type="number" step="0.001" min="0" class="form-control input-sm" placeholder="e.g. 0.134" value="' + escapeAttr(g.source_value) + '" oninput="onGroupFieldChange(\'' + g.id + '\', \'source_value\', this.value)">';
+                html += '</div>';
+            } else {
+                html += '<div class="blank-row">';
+                html +=   '<label>Wells:</label>';
+                html +=   '<input type="text" class="form-control input-sm source-wells-input" placeholder="e.g. A1, A2, A3 or A1-A3" value="' + escapeAttr(g.source_wells.join(', ')) + '" oninput="onGroupFieldChange(\'' + g.id + '\', \'source_wells_text\', this.value)">';
+                html +=   '<button type="button" class="btn btn-default btn-sm paint-btn ' + (painting('source_wells') ? 'active' : '') + '" onclick="togglePaint(\'' + g.id + '\', \'source_wells\')">' + (painting('source_wells') ? 'Stop painting' : 'Paint on grid') + '</button>';
+                html += '</div>';
+                html += '<div class="source-err blank-inline-err"></div>';
+            }
+            html += '<div class="blank-row">';
+            html +=   '<label>Apply to:</label>';
+            html +=   '<input type="text" class="form-control input-sm target-wells-input" placeholder="e.g. B1-B12, C1-C12" value="' + escapeAttr(g.target_wells.join(', ')) + '" oninput="onGroupFieldChange(\'' + g.id + '\', \'target_wells_text\', this.value)">';
+            html +=   '<button type="button" class="btn btn-default btn-sm paint-btn ' + (painting('target_wells') ? 'active' : '') + '" onclick="togglePaint(\'' + g.id + '\', \'target_wells\')">' + (painting('target_wells') ? 'Stop painting' : 'Paint on grid') + '</button>';
+            html += '</div>';
+            html += '<div class="target-err blank-inline-err"></div>';
+            html += '</div>';
+        });
+        container.innerHTML = html;
+    }
+
+    function togglePaint(groupId, field) {
+        var pm = window.blankState.paintMode;
+        if (pm.active && pm.groupId === groupId && pm.field === field) exitPaintMode();
+        else enterPaintMode(groupId, field);
+    }
+
+    function enterPaintMode(groupId, field) {
+        window.blankState.paintMode = {active: true, groupId: groupId, field: field};
+        renderBlankGroups();
+    }
+
+    function exitPaintMode() {
+        window.blankState.paintMode = {active: false, groupId: null, field: null};
+        renderBlankGroups();
+    }
+
+    function parseRangeClient(spec, plateType) {
+        var bounds = plateType === '384' ? {rows: 16, cols: 24} : {rows: 8, cols: 12};
+        var s = (spec || '').trim();
+        if (!s) throw new Error('Empty well range');
+        var out = [];
+        var tokens = s.split(',');
+        for (var i = 0; i < tokens.length; i++) {
+            var t = tokens[i].trim().toUpperCase();
+            if (!t) continue;
+            if (t.indexOf('-') >= 0) {
+                var parts = t.split('-');
+                if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim())
+                    throw new Error('Malformed range: ' + tokens[i].trim());
+                var a = splitWell(parts[0].trim(), bounds);
+                var b = splitWell(parts[1].trim(), bounds);
+                if (a.row === b.row) {
+                    var lo = Math.min(a.col, b.col), hi = Math.max(a.col, b.col);
+                    for (var c = lo; c <= hi; c++) out.push(String.fromCharCode(65 + a.row) + (c + 1));
+                } else if (a.col === b.col) {
+                    var lo2 = Math.min(a.row, b.row), hi2 = Math.max(a.row, b.row);
+                    for (var r = lo2; r <= hi2; r++) out.push(String.fromCharCode(65 + r) + (a.col + 1));
+                } else {
+                    throw new Error('Mixed row+column range not supported: ' + tokens[i].trim());
+                }
+            } else {
+                var w = splitWell(t, bounds);
+                out.push(String.fromCharCode(65 + w.row) + (w.col + 1));
+            }
+        }
+        if (!out.length) throw new Error('Empty well range');
+        var seen = {}, dedup = [];
+        out.forEach(function (x) { if (!seen[x]) { seen[x] = 1; dedup.push(x); } });
+        return dedup;
+    }
+
+    function splitWell(token, bounds) {
+        var m = /^([A-Z])([0-9]+)$/.exec(token);
+        if (!m) throw new Error('Invalid well label: ' + token);
+        var row = m[1].charCodeAt(0) - 65;
+        var col = parseInt(m[2], 10) - 1;
+        if (row < 0 || row >= bounds.rows || col < 0 || col >= bounds.cols)
+            throw new Error('Well ' + token + ' is out of bounds');
+        return {row: row, col: col};
+    }
+
+    function repaintBlankOverlays() {
+        var inputs = document.querySelectorAll('.well-input');
+        // Build: well -> { src: [{label, palette}], tgt: [{label, palette}] }
+        var map = {};
+        if (window.blankState.enabled) {
+            window.blankState.groups.forEach(function (g, idx) {
+                var info = { label: g.label || ('Blank ' + (idx + 1)), palette: idx % 12 };
+                g.source_wells.forEach(function (w) {
+                    if (!map[w]) map[w] = {src: [], tgt: []};
+                    map[w].src.push(info);
+                });
+                g.target_wells.forEach(function (w) {
+                    if (!map[w]) map[w] = {src: [], tgt: []};
+                    map[w].tgt.push(info);
+                });
+            });
+        }
+        inputs.forEach(function (el) {
+            var name = el.getAttribute('name');
+            // Strip any previous blank-* classes
+            var stale = [];
+            el.classList.forEach(function (c) {
+                if (c.indexOf('blank-source-g') === 0 || c.indexOf('blank-target-g') === 0) stale.push(c);
+            });
+            stale.forEach(function (c) { el.classList.remove(c); });
+            el.removeAttribute('title');
+            var wellInfo = map[name];
+            if (!wellInfo) return;
+            var tips = [];
+            if (wellInfo.src.length) {
+                // Use first group's palette for the ring; collisions (one well, multiple source groups) are rare
+                el.classList.add('blank-source-g' + wellInfo.src[0].palette);
+                tips.push('Blank source — Group: ' + wellInfo.src.map(function (x) { return x.label; }).join(', '));
+            }
+            if (wellInfo.tgt.length) {
+                el.classList.add('blank-target-g' + wellInfo.tgt[0].palette);
+                tips.push('Blank target — Group: ' + wellInfo.tgt.map(function (x) { return x.label; }).join(', '));
+            }
+            if (tips.length) el.setAttribute('title', tips.join('\n'));
+        });
+    }
+
+    function handleBlankPaint(wellInput, removeMode) {
+        var pm = window.blankState.paintMode;
+        if (!pm.active) return false;
+        var group = window.blankState.groups.find(function (g) { return g.id === pm.groupId; });
+        if (!group) return false;
+        var name = wellInput.getAttribute('name');
+        if (!name) return false;
+        var list = group[pm.field];
+        var idx = list.indexOf(name);
+        if (removeMode) {
+            if (idx >= 0) list.splice(idx, 1);
+        } else {
+            if (idx < 0) list.push(name);
+        }
+        var card = document.querySelector('.blank-group[data-id="' + group.id + '"]');
+        if (card) {
+            var txt = card.querySelector(pm.field === 'source_wells' ? '.source-wells-input' : '.target-wells-input');
+            if (txt) txt.value = list.join(', ');
+        }
+        repaintBlankOverlays();
+        return true;
+    }
+
+    function onUseLabelsToggle() {
+        var cb = document.getElementById('use_labels');
+        var panel = document.getElementById('blank-panel');
+        if (!panel) return;
+        if (cb && cb.checked) { panel.classList.add('disabled'); exitPaintMode(); }
+        else panel.classList.remove('disabled');
+    }
+
+    function serializeBlankOnSubmit() {
+        var hidden = document.getElementById('blank-config-json');
+        if (!hidden) return;
+        if (!window.blankState.enabled || !window.blankState.groups.length) {
+            hidden.value = '';
+            return;
+        }
+        var out = {
+            enabled: true,
+            negative_policy: window.blankState.negative_policy,
+            groups: window.blankState.groups.map(function (g) {
+                return {
+                    id: g.id,
+                    label: g.label || '',
+                    source_type: g.source_type,
+                    source_wells: g.source_type === 'wells' ? g.source_wells : [],
+                    source_value: g.source_type === 'value' && g.source_value !== '' ? g.source_value : null,
+                    target_wells: g.target_wells
+                };
+            })
+        };
+        hidden.value = JSON.stringify(out);
+    }
+
+    // Capture-phase listeners give blank paint priority over inline sample-name handlers.
+    document.addEventListener('mousedown', function (e) {
+        if (!window.blankState.paintMode.active) return;
+        var t = e.target;
+        if (t && t.classList && t.classList.contains('well-input')) {
+            e.preventDefault();
+            handleBlankPaint(t, e.shiftKey);
+        }
+    }, true);
+    document.addEventListener('mouseover', function (e) {
+        if (!window.blankState.paintMode.active || !mouseDown) return;
+        var t = e.target;
+        if (t && t.classList && t.classList.contains('well-input')) {
+            e.preventDefault();
+            handleBlankPaint(t, e.shiftKey);
+        }
+    }, true);
+    document.addEventListener('contextmenu', function (e) {
+        if (!window.blankState.paintMode.active) return;
+        var t = e.target;
+        if (t && t.classList && t.classList.contains('well-input')) {
+            e.preventDefault();
+            handleBlankPaint(t, true);
+        }
+    }, true);
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && window.blankState.paintMode.active) exitPaintMode();
+    });
+
+    // Init after DOM is ready
+    document.addEventListener('DOMContentLoaded', function () {
+        var enableCb = document.getElementById('blank-enable-cb');
+        if (enableCb) enableCb.checked = !!window.blankState.enabled;
+        if (window.blankState.enabled || window.blankState.groups.length) {
+            document.getElementById('blank-panel').classList.add('expanded');
+        }
+        var radios = document.querySelectorAll('input[name="neg_policy_radio"]');
+        radios.forEach(function (r) { r.checked = (r.value === window.blankState.negative_policy); });
+        renderBlankGroups();
+        repaintBlankOverlays();
+        var form = document.querySelector('form');
+        if (form) form.addEventListener('submit', serializeBlankOnSubmit);
+        var useCb = document.getElementById('use_labels');
+        if (useCb) useCb.addEventListener('change', onUseLabelsToggle);
+        onUseLabelsToggle();
+    });
     </script>
 </head>
 <body>
-    <!-- Instruction Button and Modal -->
-    <div class="text-center">
-    <button type="button" class="btn btn-info" onclick="openGuide()">Instructions</button>
-    </div>
-        
-    <div id="guideModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeGuide()">&times;</span>
-            <h2>User Guide for Editing Well Plates</h2>
-            <p>
-                <strong>How to Use the Well Plate Editor</strong><br><br>
-                1. <strong>Enter a Sample Name:</strong> In the text box provided, type the name of the sample you want to analyze.<br><br>
-                2. <strong>Select Wells Containing Replicates:</strong> Click on the wells that correspond to your sample replicates. Each well you click will be filled with the sample name you entered.<br><br>
-                3. <strong>Automatic Calculation:</strong> The system will automatically calculate the mean and standard deviation for all wells with the same sample name.<br><br>
-                4. <strong>Exclusion of Empty Wells:</strong> Wells that are left empty will not be included in the analysis or displayed in the final results.<br><br>
-                <strong>Alternatively,</strong> check the tickbox to use the labels from your input data. Same labels will get treated as replicates.
-            </p>
-        </div>
-    </div>
-
     <div class="container">
         <h1>Edit Well Names</h1>
+
+        <div class="instructions-panel">
+            <h4>How to Use</h4>
+            <ol>
+                <li><strong>Enter a Sample Name</strong> in the text box below.</li>
+                <li><strong>Click or drag across wells</strong> that contain replicates of that sample.</li>
+                <li>The mean and standard deviation will be <strong>calculated automatically</strong> for all wells sharing the same name.</li>
+                <li>Wells left <strong>empty</strong> will be excluded from the analysis.</li>
+            </ol>
+            <strong>Alternatively,</strong> tick the checkbox below to use the labels from your input data. Same labels will be treated as replicates.
+        </div>
         <form action="{{ url_for('edit') }}" method="post">
+            <!-- ========== Blank Subtraction (optional) ========== -->
+            <div class="blank-panel" id="blank-panel">
+                <div class="blank-panel-header" onclick="toggleBlankPanel()">
+                    <span><span class="toggle-icon"></span>Blank Subtraction (optional)</span>
+                    <label style="font-weight: normal; font-size: 13px; margin: 0;" onclick="event.stopPropagation()">
+                        <input type="checkbox" id="blank-enable-cb" onchange="onBlankEnableChange(this)"> Enable
+                    </label>
+                </div>
+                <div class="blank-panel-body">
+                    {% if blank_errors %}
+                    <div class="blank-errors">
+                        <strong>Blank subtraction errors — fix and resubmit:</strong>
+                        <ul>
+                            {% for e in blank_errors %}<li>{{ e }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                    <div class="blank-row">
+                        <label>Negative OD:</label>
+                        <label style="font-weight:normal"><input type="radio" name="neg_policy_radio" value="clip_zero" onchange="onNegPolicyChange(this)"> Clip to 0</label>
+                        <label style="font-weight:normal"><input type="radio" name="neg_policy_radio" value="allow" onchange="onNegPolicyChange(this)"> Keep negatives</label>
+                    </div>
+                    <div class="blank-hint">
+                        Source wells are used for subtraction only — you can leave them unnamed in the grid below.
+                        Paint mode: drag to add wells, Shift-drag (or right-click) to remove.
+                    </div>
+                    <div id="blank-groups-container"></div>
+                    <button type="button" class="btn btn-default btn-sm" onclick="addBlankGroup()">+ Add another blank</button>
+                </div>
+            </div>
+            <input type="hidden" name="blank_config_json" id="blank-config-json" value="">
+            <!-- ========== End blank panel ========== -->
+
             <div class="form-group">
                 <label for="sample-name-input">Sample Name:</label>
                 <input type="text" class="form-control" id="sample-name-input" placeholder="Enter sample name" oninput="setCurrentSampleName()">
