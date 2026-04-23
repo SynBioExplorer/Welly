@@ -6,8 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Edit</title>
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
-    <!-- Plotly is loaded on the page so the lazy-fetched subplot grid finds it -->
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     
     <!-- Custom styles for the well input and modal -->
     <style>
@@ -676,17 +674,7 @@
             fetch('/edit/wells_plot/{{ plate_type }}', {credentials: 'same-origin'})
                 .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
                 .then(function (html) {
-                    var container = document.getElementById('wells-plot-container');
-                    container.innerHTML = html;
-                    container.querySelectorAll('script').forEach(function (oldScript) {
-                        var newScript = document.createElement('script');
-                        for (var i = 0; i < oldScript.attributes.length; i++) {
-                            var attr = oldScript.attributes[i];
-                            newScript.setAttribute(attr.name, attr.value);
-                        }
-                        newScript.text = oldScript.innerHTML;
-                        oldScript.parentNode.replaceChild(newScript, oldScript);
-                    });
+                    document.getElementById('wells-plot-container').innerHTML = html;
                 })
                 .catch(function (err) {
                     document.getElementById('wells-plot-container').innerHTML =

@@ -425,6 +425,107 @@ def handle_duplicates(col, col_tracker):
 def remove_suffixes(col_name):
     return re.sub(r'\.\d+$', '', str(col_name))
 
+def _build_wells_svg_grid(df, plate_type):
+    """Render the per-well growth curves as a static inline-SVG plate grid.
+    Far lighter than Plotly subplots for this use case — the grid is display-only
+    (no hover, no zoom), so 384 tiny SVG polylines replace the Plotly engine entirely.
+    Typical payload: ~50-100 KB for 384-well vs ~630 KB with Plotly."""
+    if plate_type == '96':
+        n_rows, n_cols = 8, 12
+        max_points = None   # 96-well typically <= 432 points; fine as-is
+        label_size = 9
+        vb_w, vb_h = 90, 60  # SVG viewBox dimensions (aspect only)
+    else:
+        n_rows, n_cols = 16, 24
+        max_points = 50     # keep the curve shape, shrink the path string
+        label_size = 7
+        vb_w, vb_h = 60, 40
+
+    well_columns = list(df.columns[1:])
+    all_od = df.iloc[:, 1:]
+    y_min = float(all_od.min().min())
+    y_max = float(all_od.max().max())
+    y_range = max(y_max - y_min, 1e-9)
+
+    n_pts = len(df)
+    if max_points is not None and n_pts > max_points:
+        step = max(1, n_pts // max_points)
+        t_indices = list(range(0, n_pts, step))
+    else:
+        t_indices = list(range(n_pts))
+
+    if len(t_indices) > 1:
+        x_coords = [i * vb_w / (len(t_indices) - 1) for i in range(len(t_indices))]
+    else:
+        x_coords = [vb_w / 2]
+
+    # Map well labels to (row, col) positions on the plate grid
+    well_re = re.compile(r'^([A-P])(\d{1,2})$')
+    well_positions = {}
+    used = set()
+    for col_name in well_columns:
+        m = well_re.match(col_name)
+        if m:
+            r = ord(m.group(1)) - 65
+            c = int(m.group(2)) - 1
+            if 0 <= r < n_rows and 0 <= c < n_cols:
+                well_positions[col_name] = (r, c)
+                used.add((r, c))
+    next_slot = 0
+    for col_name in well_columns:
+        if col_name not in well_positions:
+            while next_slot < n_rows * n_cols and (next_slot // n_cols, next_slot % n_cols) in used:
+                next_slot += 1
+            if next_slot < n_rows * n_cols:
+                pos = (next_slot // n_cols, next_slot % n_cols)
+                well_positions[col_name] = pos
+                used.add(pos)
+                next_slot += 1
+    pos_to_well = {v: k for k, v in well_positions.items()}
+
+    # Pre-fetch well data as numpy arrays for fast indexing
+    well_data = {w: df[w].values for w in well_columns}
+
+    # Build the table row by row
+    parts = []
+    # Column header
+    parts.append('<tr><th></th>' + ''.join(f'<th>{c + 1}</th>' for c in range(n_cols)) + '</tr>')
+    for r in range(n_rows):
+        row_label = chr(65 + r)
+        parts.append(f'<tr><th>{row_label}</th>')
+        for c in range(n_cols):
+            well_name = pos_to_well.get((r, c))
+            if well_name is None:
+                parts.append('<td class="empty"></td>')
+                continue
+            y_vals = well_data[well_name]
+            pts = []
+            for i, ti in enumerate(t_indices):
+                if ti < len(y_vals):
+                    y_norm = (y_vals[ti] - y_min) / y_range
+                    y_px = vb_h - y_norm * vb_h  # invert Y axis (SVG origin top-left)
+                    pts.append(f'{x_coords[i]:.1f},{y_px:.1f}')
+            svg = (
+                f'<svg viewBox="0 0 {vb_w} {vb_h}" preserveAspectRatio="none">'
+                f'<polyline fill="none" stroke="#1f77b4" stroke-width="1" '
+                f'points="{" ".join(pts)}"/></svg>'
+            )
+            parts.append(f'<td><span class="lbl">{well_name}</span>{svg}</td>')
+        parts.append('</tr>')
+
+    style = (
+        '<style>'
+        '.wells-svg{border-collapse:collapse;table-layout:fixed;width:100%;font-family:Arial,sans-serif}'
+        f'.wells-svg th{{font-weight:normal;color:#666;padding:2px;text-align:center;font-size:{label_size}px}}'
+        '.wells-svg td{padding:0;border:1px solid #eee;position:relative;aspect-ratio:1/1}'
+        '.wells-svg td.empty{border:none;background:transparent}'
+        f'.wells-svg .lbl{{position:absolute;top:1px;left:3px;font-size:{label_size - 1}px;color:#999;pointer-events:none;z-index:1}}'
+        '.wells-svg svg{width:100%;height:100%;display:block}'
+        '</style>'
+    )
+    return style + '<table class="wells-svg">' + ''.join(parts) + '</table>'
+
+
 def _build_wells_plot_div(df, plate_type):
     """Build the per-well subplot grid for the edit page and return a Plotly HTML div.
     Factored out so it can be called lazily from /edit/wells_plot/<plate_type>."""
@@ -518,19 +619,19 @@ def _build_wells_plot_div(df, plate_type):
 
 @app.route('/edit/wells_plot/<string:plate_type>')
 def edit_wells_plot(plate_type):
-    """Lazy-load endpoint for the subplot grid. Returns just the Plotly HTML div.
-    Uses the same session-scoped cache as before so repeat fetches are instant."""
+    """Lazy-load endpoint for the subplot grid. Returns static inline-SVG HTML
+    (no Plotly). Session-scoped cache makes repeat fetches instant."""
     if plate_type not in ('96', '384'):
         return 'Invalid plate type', 400
     df = cache.get(f'data_{cache_key()}')
     if df is None:
         return 'Session expired', 400
     key = f'edit_plot_html_{cache_key()}_{plate_type}'
-    wells_div = cache.get(key)
-    if wells_div is None:
-        wells_div = _build_wells_plot_div(df, plate_type)
-        cache.set(key, wells_div)
-    return wells_div
+    wells_html = cache.get(key)
+    if wells_html is None:
+        wells_html = _build_wells_svg_grid(df, plate_type)
+        cache.set(key, wells_html)
+    return wells_html
 
 
 @app.route('/edit', methods=['GET', 'POST'])
@@ -1339,7 +1440,7 @@ def download_report():
 <head>
 <meta charset="UTF-8">
 <title>Growth Analysis Report</title>
-<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
   /* ---- Nature-style report ---- */
   *, *::before, *::after {{ box-sizing: border-box; }}
