@@ -512,7 +512,8 @@ def _build_wells_plot_div(df, plate_type):
     for ann in fig.layout.annotations:
         ann.font.size = 7 if plate_type == '384' else 9
 
-    return pyo.plot(fig, output_type='div', include_plotlyjs='cdn')
+    # Templates load Plotly from CDN in <head>, so don't re-embed it here.
+    return pyo.plot(fig, output_type='div', include_plotlyjs=False)
 
 
 @app.route('/edit/wells_plot/<string:plate_type>')
