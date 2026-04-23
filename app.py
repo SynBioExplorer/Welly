@@ -404,6 +404,9 @@ def plate_selection():
         # Store the data using a user-specific cache key
         cache.set(f'data_{cache_key()}', df)
         cache.set(f'plate_type_{cache_key()}', plate_type)
+        # New upload invalidates any cached rendered-edit HTML
+        cache.delete(f'edit_plot_html_{cache_key()}_96')
+        cache.delete(f'edit_plot_html_{cache_key()}_384')
 
         return redirect(url_for('edit', plate_type=plate_type))
     except (pd.errors.EmptyDataError, ValueError, TypeError) as e:
@@ -481,99 +484,105 @@ def edit():
             return redirect(url_for('results'))
         # Validation failed: fall through to render the edit page again with errors displayed.
 
-    # Generate individual well growth curves as a subplot grid matching the plate layout
-    if plate_type == '96':
-        n_rows, n_cols = 8, 12
-    else:
-        n_rows, n_cols = 16, 24
+    # The subplot grid is deterministic from `data_{uid}` + plate_type; cache the rendered
+    # HTML so repeat /edit visits (back-navigation, validation re-renders) don't rebuild
+    # 384 traces every time. Invalidated on /plate_selection.
+    edit_plot_key = f'edit_plot_html_{cache_key()}_{plate_type}'
+    wells_div = cache.get(edit_plot_key)
+    if wells_div is None:
+        if plate_type == '96':
+            n_rows, n_cols = 8, 12
+        else:
+            n_rows, n_cols = 16, 24
 
-    row_labels = [chr(65 + i) for i in range(n_rows)]
-    col_labels = [str(j + 1) for j in range(n_cols)]
-    subplot_titles = [f"{row_labels[r]}{col_labels[c]}" for r in range(n_rows) for c in range(n_cols)]
+        row_labels = [chr(65 + i) for i in range(n_rows)]
+        col_labels = [str(j + 1) for j in range(n_cols)]
+        subplot_titles = [f"{row_labels[r]}{col_labels[c]}" for r in range(n_rows) for c in range(n_cols)]
 
-    fig = make_subplots(
-        rows=n_rows, cols=n_cols,
-        subplot_titles=subplot_titles,
-        horizontal_spacing=0.01,
-        vertical_spacing=0.03
-    )
+        fig = make_subplots(
+            rows=n_rows, cols=n_cols,
+            subplot_titles=subplot_titles,
+            horizontal_spacing=0.01,
+            vertical_spacing=0.03
+        )
 
-    time_hours = df['Time'] / 60
-    well_columns = list(df.columns[1:])
+        time_hours = df['Time'] / 60
+        well_columns = list(df.columns[1:])
 
-    # For 384-well plates, downsample to every nth point for performance
-    if plate_type == '384' and len(time_hours) > 50:
-        step = max(1, len(time_hours) // 50)
-        time_ds = time_hours.iloc[::step]
-    else:
-        step = 1
-        time_ds = time_hours
+        # For 384-well plates, downsample to every nth point for performance
+        if plate_type == '384' and len(time_hours) > 50:
+            step = max(1, len(time_hours) // 50)
+            time_ds = time_hours.iloc[::step]
+        else:
+            step = 1
+            time_ds = time_hours
 
-    trace_type = go.Scattergl if plate_type == '384' else go.Scatter
+        trace_type = go.Scattergl if plate_type == '384' else go.Scatter
 
-    # Map wells to grid positions: standard labels (A1-P24) go to correct position,
-    # non-standard labels fill sequentially into remaining slots
-    well_re = re.compile(r'^([A-P])(\d{1,2})$')
-    used_positions = set()
-    well_positions = {}
-    for col_name in well_columns:
-        m = well_re.match(col_name)
-        if m:
-            r = ord(m.group(1)) - 65  # A=0, B=1, ...
-            c = int(m.group(2)) - 1   # 1-based to 0-based
-            if 0 <= r < n_rows and 0 <= c < n_cols:
-                well_positions[col_name] = (r, c)
-                used_positions.add((r, c))
-    # Non-standard labels fill sequentially into unused slots
-    next_slot = 0
-    for col_name in well_columns:
-        if col_name not in well_positions:
-            while next_slot < n_rows * n_cols and (next_slot // n_cols, next_slot % n_cols) in used_positions:
-                next_slot += 1
-            if next_slot < n_rows * n_cols:
-                pos = (next_slot // n_cols, next_slot % n_cols)
-                well_positions[col_name] = pos
-                used_positions.add(pos)
-                next_slot += 1
+        # Map wells to grid positions: standard labels (A1-P24) go to correct position,
+        # non-standard labels fill sequentially into remaining slots
+        well_re = re.compile(r'^([A-P])(\d{1,2})$')
+        used_positions = set()
+        well_positions = {}
+        for col_name in well_columns:
+            m = well_re.match(col_name)
+            if m:
+                r = ord(m.group(1)) - 65  # A=0, B=1, ...
+                c = int(m.group(2)) - 1   # 1-based to 0-based
+                if 0 <= r < n_rows and 0 <= c < n_cols:
+                    well_positions[col_name] = (r, c)
+                    used_positions.add((r, c))
+        # Non-standard labels fill sequentially into unused slots
+        next_slot = 0
+        for col_name in well_columns:
+            if col_name not in well_positions:
+                while next_slot < n_rows * n_cols and (next_slot // n_cols, next_slot % n_cols) in used_positions:
+                    next_slot += 1
+                if next_slot < n_rows * n_cols:
+                    pos = (next_slot // n_cols, next_slot % n_cols)
+                    well_positions[col_name] = pos
+                    used_positions.add(pos)
+                    next_slot += 1
 
-    for col_name in well_columns:
-        if col_name not in well_positions:
-            continue  # more wells than grid slots (shouldn't happen)
-        r, c = well_positions[col_name]
-        y_data = df[col_name].iloc[::step] if step > 1 else df[col_name]
-        fig.add_trace(trace_type(
-            x=time_ds, y=y_data,
-            mode='lines', name=col_name,
-            line=dict(width=1, color='#1f77b4'),
-            showlegend=False
-        ), row=r + 1, col=c + 1)
+        for col_name in well_columns:
+            if col_name not in well_positions:
+                continue  # more wells than grid slots (shouldn't happen)
+            r, c = well_positions[col_name]
+            y_data = df[col_name].iloc[::step] if step > 1 else df[col_name]
+            fig.add_trace(trace_type(
+                x=time_ds, y=y_data,
+                mode='lines', name=col_name,
+                line=dict(width=1, color='#1f77b4'),
+                showlegend=False, hoverinfo='skip'
+            ), row=r + 1, col=c + 1)
 
-    # Match width to the Bootstrap container (~1100px) for both plate types
-    plot_width = 1100
-    cell_h = plot_width // n_cols
-    plot_height = n_rows * cell_h + 60
-    fig.update_layout(
-        width=plot_width,
-        height=plot_height,
-        paper_bgcolor='white', plot_bgcolor='white',
-        showlegend=False,
-        margin=dict(l=30, r=30, t=40, b=20)
-    )
+        # Match width to the Bootstrap container (~1100px) for both plate types
+        plot_width = 1100
+        cell_h = plot_width // n_cols
+        plot_height = n_rows * cell_h + 60
+        fig.update_layout(
+            width=plot_width,
+            height=plot_height,
+            paper_bgcolor='white', plot_bgcolor='white',
+            showlegend=False,
+            margin=dict(l=30, r=30, t=40, b=20)
+        )
 
-    # Uniform y-axis range across all subplots
-    all_od = df.iloc[:, 1:]
-    y_min = float(all_od.min().min())
-    y_max = float(all_od.max().max())
-    y_pad = (y_max - y_min) * 0.05
-    fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor='#ddd')
-    fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor='#ddd',
-                     range=[y_min - y_pad, y_max + y_pad])
+        # Uniform y-axis range across all subplots
+        all_od = df.iloc[:, 1:]
+        y_min = float(all_od.min().min())
+        y_max = float(all_od.max().max())
+        y_pad = (y_max - y_min) * 0.05
+        fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor='#ddd')
+        fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor='#ddd',
+                         range=[y_min - y_pad, y_max + y_pad])
 
-    # Make subplot titles smaller
-    for ann in fig.layout.annotations:
-        ann.font.size = 7 if plate_type == '384' else 9
+        # Make subplot titles smaller
+        for ann in fig.layout.annotations:
+            ann.font.size = 7 if plate_type == '384' else 9
 
-    wells_div = pyo.plot(fig, output_type='div', include_plotlyjs='cdn')
+        wells_div = pyo.plot(fig, output_type='div', include_plotlyjs='cdn')
+        cache.set(edit_plot_key, wells_div)
 
     well_names = list(df.columns[1:])
     blank_config_json_str = json.dumps(blank_config) if blank_config else 'null'
