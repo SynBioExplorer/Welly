@@ -669,7 +669,36 @@
         </form>
 
         <h2>Individual Well Growth Curves</h2>
-        {{ heatmap_graph | safe }}
+        <div id="wells-plot-container">
+            <p style="text-align:center; color:#888; padding:40px 0;">Loading growth curves…</p>
+        </div>
+        <script>
+        (function () {
+            // Lazy-load the subplot grid so the naming form above is interactive immediately.
+            fetch('/edit/wells_plot/{{ plate_type }}', {credentials: 'same-origin'})
+                .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+                .then(function (html) {
+                    var container = document.getElementById('wells-plot-container');
+                    container.innerHTML = html;
+                    // Browsers don't auto-execute <script> tags inserted via innerHTML;
+                    // replace each with a fresh <script> to trigger execution.
+                    container.querySelectorAll('script').forEach(function (oldScript) {
+                        var newScript = document.createElement('script');
+                        for (var i = 0; i < oldScript.attributes.length; i++) {
+                            var attr = oldScript.attributes[i];
+                            newScript.setAttribute(attr.name, attr.value);
+                        }
+                        newScript.text = oldScript.innerHTML;
+                        oldScript.parentNode.replaceChild(newScript, oldScript);
+                    });
+                })
+                .catch(function (err) {
+                    document.getElementById('wells-plot-container').innerHTML =
+                        '<p style="color:#a00; text-align:center;">Could not load growth curves: ' +
+                        (err && err.message ? err.message : 'unknown error') + '</p>';
+                });
+        })();
+        </script>
     </div>
 </body>
 </html>
